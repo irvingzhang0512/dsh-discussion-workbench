@@ -11,3 +11,5 @@ dsh plugin --profile web add .
 ```
 
 实现边界见 [docs/architecture.md](docs/architecture.md)，当前验证证据见 [docs/acceptance.md](docs/acceptance.md)。
+
+会议录音和转写的实际操作方式见 [用语音整理会议纪要](docs/voice-meeting-minutes-guide.md)。

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -51,9 +51,28 @@ describe('WorkbenchStore', () => {
       await writeFile(join(env.root, 'a.md'), '# A\n', 'utf8')
       await writeFile(join(outside, 'outside.txt'), 'secret', 'utf8')
       await env.store.update('a', { targetFile: 'a.md' })
+      expect((await env.store.get('a')).targetBinding).toBe('bound')
       expect((await env.store.get('b')).targetFile).toBeNull()
       await expect(env.store.update('a', { addPath: join(outside, 'outside.txt') })).rejects.toThrow('超出会话工作区')
+      expect((await env.store.get('a')).materials).toEqual([])
+      expect((await env.store.get('a')).targetFile).toBe(join(env.root, 'a.md'))
     } finally { await env.cleanup(); await rm(outside, { recursive: true, force: true }) }
+  })
+
+  it('持久化失败时不发布或保留半完成的上下文', async () => {
+    const env = await fixture()
+    try {
+      await writeFile(join(env.root, 'a.md'), '# A\n', 'utf8')
+      await env.store.update('a', { targetFile: 'a.md' })
+      const beforeChanges = env.changes.length
+      vi.spyOn(env.store, 'persist').mockRejectedValueOnce(new Error('disk full'))
+      await expect(env.store.update('a', { scene: 'project' })).rejects.toThrow('disk full')
+      expect((await env.store.get('a')).scene).toBe('meeting')
+      expect(env.changes).toHaveLength(beforeChanges)
+      vi.spyOn(env.store, 'persist').mockRejectedValueOnce(new Error('disk full'))
+      await expect(env.store.mutateRuntime('a', state => { state.targetBinding = 'error' }, true)).rejects.toThrow('disk full')
+      expect((await env.store.get('a')).targetBinding).toBe('bound')
+    } finally { await env.cleanup() }
   })
 })
 

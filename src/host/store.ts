@@ -27,18 +27,23 @@ export class WorkbenchStore {
   peek(sessionId: string): WorkbenchState | undefined { return this.states.get(sessionId) }
 
   async mutateRuntime(sessionId: string, mutate: (state: WorkbenchState) => void, persist = false): Promise<WorkbenchState> {
-    const state = await this.get(sessionId)
+    const current = await this.get(sessionId)
+    const state = persist ? structuredClone(current) : current
     mutate(state)
     state.updatedAt = Date.now()
-    if (persist) await this.persist(state)
+    if (persist) { await this.persist(state); this.states.set(sessionId, state) }
     this.options.onChange(sessionId, structuredClone(state))
     return state
   }
 
   async update(sessionId: string, patch: { scene?: WorkbenchScene, targetFile?: string | null, addPath?: string, paste?: { label: string, content: string }, removeMaterialId?: string }): Promise<WorkbenchState> {
-    const state = await this.get(sessionId)
+    const state = structuredClone(await this.get(sessionId))
     if (patch.scene !== undefined) state.scene = patch.scene
-    if (patch.targetFile !== undefined) state.targetFile = patch.targetFile === null || patch.targetFile === '' ? null : await this.resolveAllowed(sessionId, patch.targetFile, ['.md', '.markdown'])
+    if (patch.targetFile !== undefined) {
+      state.targetFile = patch.targetFile === null || patch.targetFile === '' ? null : await this.resolveAllowed(sessionId, patch.targetFile, ['.md', '.markdown'])
+      state.targetBinding = state.targetFile === null ? 'unbound' : 'bound'
+      if (state.targetFile === null) { state.document = null; state.lastChange = null }
+    }
     if (patch.addPath !== undefined && patch.addPath !== '') {
       const path = await this.resolveAllowed(sessionId, patch.addPath, ['.md', '.markdown', '.txt'])
       if (!state.materials.some(material => material.path === path)) state.materials.push({ id: randomUUID(), label: path.split(/[\\/]/).at(-1) ?? path, kind: 'file', path, addedAt: Date.now() })
@@ -47,15 +52,20 @@ export class WorkbenchStore {
       const label = safeLabel(patch.paste.label || '粘贴材料')
       const folder = join(this.options.cwd(sessionId), '.dsh-workbench', 'materials', safeSession(sessionId))
       await mkdir(folder, { recursive: true })
-      const path = join(folder, `${Date.now()}-${label}.txt`)
+      const path = join(folder, `${Date.now()}-${randomUUID()}-${label}.txt`)
       await writeFile(path, patch.paste.content, 'utf8')
       state.materials.push({ id: randomUUID(), label, kind: 'paste', path, addedAt: Date.now() })
     }
     if (patch.removeMaterialId !== undefined) state.materials = state.materials.filter(material => material.id !== patch.removeMaterialId)
     state.updatedAt = Date.now()
     await this.persist(state)
+    this.states.set(sessionId, state)
     this.options.onChange(sessionId, structuredClone(state))
     return state
+  }
+
+  resolveTarget(sessionId: string, raw: string): Promise<string> {
+    return this.resolveAllowed(sessionId, raw, ['.md', '.markdown'])
   }
 
   async readMaterial(sessionId: string, materialId: string, offset: number, maxChars: number): Promise<{ material: WorkbenchMaterial, content: string, offset: number, nextOffset: number, truncated: boolean }> {
@@ -85,13 +95,13 @@ export class WorkbenchStore {
   async persist(state: WorkbenchState): Promise<void> {
     const path = this.statePath(state.sessionId)
     await mkdir(dirname(path), { recursive: true })
-    const temp = `${path}.tmp-${process.pid}-${Date.now()}`
+    const temp = `${path}.tmp-${process.pid}-${randomUUID()}`
     await writeFile(temp, JSON.stringify({ ...state, connected: false, task: state.task.phase === 'idle' || state.task.phase === 'complete' || state.task.phase === 'failed' ? state.task : { phase: 'interrupted', label: '上次任务因宿主停止而中断' } }, null, 2) + '\n', 'utf8')
     try { await rename(temp, path) } catch (error) { await unlink(temp).catch(() => {}); throw error }
   }
 
   private async load(sessionId: string): Promise<WorkbenchState> {
-    let state: WorkbenchState = { sessionId, scene: 'meeting', targetFile: null, materials: [], task: { phase: 'idle', label: '' }, lastChange: null, document: null, browser: null, view: null, metrics: { modelToolRounds: 0 }, connected: false, updatedAt: Date.now() }
+    let state: WorkbenchState = { sessionId, scene: 'meeting', targetFile: null, targetBinding: 'unbound', materials: [], task: { phase: 'idle', label: '' }, lastChange: null, document: null, browser: null, view: null, metrics: { modelToolRounds: 0 }, connected: false, updatedAt: Date.now() }
     try {
       const parsed = JSON.parse(await readFile(this.statePath(sessionId), 'utf8')) as WorkbenchState
       if (parsed.sessionId === sessionId) state = { ...state, ...parsed, browser: null, view: null, metrics: { ...parsed.metrics, modelToolRounds: parsed.metrics?.modelToolRounds ?? 0 }, connected: false }
@@ -99,6 +109,7 @@ export class WorkbenchStore {
     if (state.targetFile !== null) {
       try { state.targetFile = await this.resolveAllowed(sessionId, state.targetFile, ['.md', '.markdown']) } catch { state.targetFile = null }
     }
+    state.targetBinding = 'unbound'
     state.materials = (await Promise.all(state.materials.map(async material => {
       try { await this.resolveAllowed(sessionId, material.path, ['.md', '.markdown', '.txt']); return material } catch { return null }
     }))).filter((material): material is WorkbenchMaterial => material !== null)

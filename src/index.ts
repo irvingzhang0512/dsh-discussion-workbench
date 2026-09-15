@@ -28,6 +28,10 @@ export function apply(ctx: Context): void {
   const pendingViewRefresh = new Map<string, number>()
   const turnTimings = new Map<string, { turn: number, startedAt: number, toolSteps: Set<number>, firstTextRecorded: boolean }>()
   const documentCalls = new Map<string, string>()
+  const contextQueues = new Map<string, Promise<void>>()
+  const contextTransitions = new Set<string>()
+  const contextRequestResults = new Map<string, { ok: boolean, message: string }>()
+  const contextRequestTasks = new Map<string, Promise<{ ok: boolean, message: string }>>()
 
   const findNodeTitle = (root: { id: string, title: string, children: typeof root[] }, id: string | null): string | null => {
     if (id === null) return null
@@ -41,8 +45,10 @@ export function apply(ctx: Context): void {
   }
 
   const syncDocument = async (sessionId: string, change?: { action?: string, elapsedMs?: number, summary?: { counts: { added: number, updated: number, deleted: number }, added_node_ids: string[], updated_node_ids: string[], deleted_node_ids: string[] } }): Promise<void> => {
+    if (contextTransitions.has(sessionId)) return
     const targetFile = (await store.get(sessionId)).targetFile
-    const snapshot = targetFile === null ? null : documentService?.getDocumentSnapshot(sessionId) ?? null
+    const candidate = targetFile === null ? null : documentService?.getDocumentSnapshot(sessionId) ?? null
+    const snapshot = candidate?.currentFile === targetFile ? candidate : null
     if (change?.action !== undefined) pendingViewRefresh.set(sessionId, Date.now())
     await store.mutateRuntime(sessionId, state => {
       state.document = snapshot === null ? null : {
@@ -69,7 +75,13 @@ export function apply(ctx: Context): void {
     }
     if (sidebarService !== undefined && !sidebarSubscriptions.has(sessionId)) {
       sidebarSubscriptions.set(sessionId, sidebarService.subscribe(sessionId, sidebar => {
-        void store.mutateRuntime(sessionId, state => { state.browser = { currentFile: sidebar.currentFile, connected: sidebar.connected } })
+        void store.mutateRuntime(sessionId, state => { state.browser = {
+          currentFile: sidebar.currentFile,
+          fileCandidate: sidebar.fileCandidate,
+          fileCandidateSource: sidebar.fileCandidateSource,
+          workspaceRoot: sidebar.workspaceRoot,
+          connected: sidebar.connected,
+        } })
       }))
     }
     if (viewService !== undefined && !viewSubscriptions.has(sessionId)) {
@@ -86,24 +98,67 @@ export function apply(ctx: Context): void {
     }
   }
 
-  const afterContext = async (sessionId: string): Promise<void> => {
+  const reconcileContext = async (sessionId: string): Promise<void> => {
     const state = await store.get(sessionId)
     ensureSubscription(sessionId)
     if (documentService !== undefined && state.targetFile !== null) {
       const bound = await documentService.bindCurrentFile(sessionId, state.targetFile)
+      await store.mutateRuntime(sessionId, current => { current.targetBinding = bound ? 'bound' : 'error' }, true)
       if (!bound) throw new Error(`无法绑定整理目标:${state.targetFile}`)
+    } else if (state.targetFile === null) {
+      await store.mutateRuntime(sessionId, current => { current.targetBinding = 'unbound'; current.document = null })
     }
     await syncDocument(sessionId)
   }
 
-  const toolsDisposer = registerWorkbenchTools(ctx, { store, afterContext })
+  const enqueueContext = <T,>(sessionId: string, operation: () => Promise<T>): Promise<T> => {
+    const previous = contextQueues.get(sessionId) ?? Promise.resolve()
+    const result = previous.catch(() => undefined).then(operation)
+    const tail = result.then(() => undefined, () => undefined)
+    contextQueues.set(sessionId, tail)
+    void tail.finally(() => { if (contextQueues.get(sessionId) === tail) contextQueues.delete(sessionId) })
+    return result
+  }
+  const queueReconcile = (sessionId: string): Promise<void> => enqueueContext(sessionId, () => reconcileContext(sessionId))
+
+  const setContext = (sessionId: string, patch: Parameters<WorkbenchStore['update']>[1]) => enqueueContext(sessionId, async () => {
+    ensureSubscription(sessionId)
+    if (patch.targetFile === undefined) return store.update(sessionId, patch)
+    if (documentService === undefined) throw new Error('结构化文档服务不可用。')
+    const before = await store.get(sessionId)
+    const oldTarget = before.targetFile
+    const target = patch.targetFile === null || patch.targetFile === '' ? null : await store.resolveTarget(sessionId, patch.targetFile)
+    contextTransitions.add(sessionId)
+    try {
+      const bound = target === null
+        ? (await documentService.unbindCurrentFile(sessionId), true)
+        : await documentService.bindCurrentFile(sessionId, target)
+      if (!bound) throw new Error(`无法绑定整理目标:${target}`)
+      await store.update(sessionId, { ...patch, targetFile: target })
+    } catch (error) {
+      const recovered = oldTarget === null
+        ? documentService.unbindCurrentFile(sessionId).then(() => true, () => false)
+        : documentService.bindCurrentFile(sessionId, oldTarget)
+      if (!await recovered) {
+        await documentService.unbindCurrentFile(sessionId).catch(() => undefined)
+        await store.mutateRuntime(sessionId, current => { current.targetBinding = 'error'; current.document = null })
+      }
+      contextTransitions.delete(sessionId)
+      await syncDocument(sessionId).catch(() => undefined)
+      throw error
+    }
+    contextTransitions.delete(sessionId)
+    await syncDocument(sessionId)
+    if (target !== null && viewService !== undefined) await viewService.dispatch(sessionId, { name: 'open_tab' }).catch(() => undefined)
+    return store.get(sessionId)
+  })
+
+  const toolsDisposer = registerWorkbenchTools(ctx, { store, setContext })
   const removeService = ctx.provide('discussionWorkbench', {
     id: 'dsh-discussion-workbench' as const,
     getContext: (sessionId: string) => store.get(sessionId),
     setContext: async (sessionId: string, patch: Parameters<WorkbenchStore['update']>[1]) => {
-      const state = await store.update(sessionId, patch)
-      await afterContext(sessionId)
-      return state
+      return setContext(sessionId, patch)
     },
     readMaterial: (sessionId: string, materialId: string, offset = 0, maxChars = 12000) => store.readMaterial(sessionId, materialId, offset, maxChars),
   })
@@ -192,13 +247,29 @@ export function apply(ctx: Context): void {
 
   function attach(ws: WebSocket, sessionId: string): void {
     const detach = bridge.attach(sessionId, ws)
-    void store.mutateRuntime(sessionId, state => { state.connected = true }).then(() => afterContext(sessionId))
+    void store.mutateRuntime(sessionId, state => { state.connected = true }).then(() => queueReconcile(sessionId)).catch(error => bridge.error(sessionId, String(error)))
     ws.on('message', data => {
       let message: ClientMessage
       try { message = JSON.parse(data.toString()) as ClientMessage } catch { return }
-      if (message.type === 'hello') { void afterContext(sessionId); return }
+      if (message.type === 'hello') { void queueReconcile(sessionId).catch(error => bridge.error(sessionId, String(error))); return }
       if (message.type === 'set-context') {
-        void store.update(sessionId, message).then(() => afterContext(sessionId)).catch(error => bridge.error(sessionId, String(error)))
+        if (message.requestId === undefined) {
+          void setContext(sessionId, message).catch(error => bridge.error(sessionId, error instanceof Error ? error.message : String(error)))
+          return
+        }
+        const key = `${sessionId}:${message.requestId}`
+        const known = contextRequestResults.get(key)
+        if (known !== undefined) { bridge.result(sessionId, message.requestId, known.ok, known.message); return }
+        let task = contextRequestTasks.get(key)
+        if (task === undefined) {
+          task = setContext(sessionId, message).then(
+            () => ({ ok: true, message: '工作台上下文已更新。' }),
+            error => ({ ok: false, message: error instanceof Error ? error.message : String(error) }),
+          )
+          contextRequestTasks.set(key, task)
+          void task.then(result => { contextRequestTasks.delete(key); contextRequestResults.set(key, result) })
+        }
+        void task.then(result => bridge.result(sessionId, message.requestId!, result.ok, result.message))
         return
       }
       if (message.type === 'undo') {
@@ -225,7 +296,7 @@ export function apply(ctx: Context): void {
     for (const unsubscribe of subscriptions.values()) unsubscribe()
     for (const unsubscribe of sidebarSubscriptions.values()) unsubscribe()
     for (const unsubscribe of viewSubscriptions.values()) unsubscribe()
-    subscriptions.clear(); sidebarSubscriptions.clear(); viewSubscriptions.clear(); pendingViewRefresh.clear(); turnTimings.clear(); documentCalls.clear(); bridge.close(); wss.close()
+    subscriptions.clear(); sidebarSubscriptions.clear(); viewSubscriptions.clear(); pendingViewRefresh.clear(); turnTimings.clear(); documentCalls.clear(); contextQueues.clear(); contextTransitions.clear(); contextRequestResults.clear(); contextRequestTasks.clear(); bridge.close(); wss.close()
   }, 'dsh-discussion-workbench: teardown')
 }
 

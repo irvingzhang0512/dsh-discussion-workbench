@@ -22,7 +22,7 @@ function render(_args: unknown, value: unknown) {
 
 export interface ToolOptions {
   store: WorkbenchStore
-  afterContext(sessionId: string): Promise<void>
+  setContext(sessionId: string, patch: Parameters<WorkbenchStore['update']>[1]): Promise<Awaited<ReturnType<WorkbenchStore['update']>>>
 }
 
 export function registerWorkbenchTools(ctx: { tools: { register(tool: unknown): () => void } }, options: ToolOptions): () => void {
@@ -50,14 +50,13 @@ export function registerWorkbenchTools(ctx: { tools: { register(tool: unknown): 
         const id = sessionId(exec); if (id === null) return { success: false, message: '无法确定当前会话。' }
         try {
           const paste = args.pasted_material as null | { label?: unknown, content?: unknown } | undefined
-          const state = await options.store.update(id, {
+          const state = await options.setContext(id, {
             ...(args.scene !== undefined ? { scene: args.scene as WorkbenchScene } : {}),
             ...(args.target_file !== undefined ? { targetFile: args.target_file === '' ? null : args.target_file } : {}),
             ...(args.add_material_path !== undefined ? { addPath: args.add_material_path } : {}),
             ...(paste !== undefined ? { paste: { label: typeof paste?.label === 'string' ? paste.label : '粘贴材料', content: typeof paste?.content === 'string' ? paste.content : '' } } : {}),
             ...(args.remove_material_id !== undefined ? { removeMaterialId: args.remove_material_id } : {}),
           })
-          await options.afterContext(id)
           return { success: true, message: describe(state), context: JSON.parse(JSON.stringify(state)) }
         } catch (error) { return { success: false, message: error instanceof Error ? error.message : String(error) } }
       },

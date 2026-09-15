@@ -50,7 +50,14 @@ export interface WorkbenchState {
     dirty: boolean
     undoDepth: number
   } | null
-  browser: { currentFile: string | null, connected: boolean } | null
+  browser: {
+    currentFile: string | null
+    fileCandidate?: string | null
+    fileCandidateSource?: 'current' | 'recent' | null
+    workspaceRoot?: string | null
+    connected: boolean
+  } | null
+  targetBinding: 'unbound' | 'bound' | 'error'
   view: { currentView: 'markdown' | 'mindmap' | 'table', connected: boolean } | null
   metrics: WorkbenchMetrics
   connected: boolean
@@ -59,10 +66,11 @@ export interface WorkbenchState {
 
 export type ClientMessage =
   | { type: 'hello' }
-  | { type: 'set-context', scene?: WorkbenchScene, targetFile?: string | null, addPath?: string, paste?: { label: string, content: string }, removeMaterialId?: string }
+  | { type: 'set-context', requestId?: string, scene?: WorkbenchScene, targetFile?: string | null, addPath?: string, paste?: { label: string, content: string }, removeMaterialId?: string }
   | { type: 'undo' }
   | { type: 'set-view', view: 'markdown' | 'mindmap' | 'table' }
 
 export type HostMessage =
   | { type: 'state', state: WorkbenchState }
   | { type: 'error', message: string }
+  | { type: 'operation-result', requestId: string, ok: boolean, message: string }

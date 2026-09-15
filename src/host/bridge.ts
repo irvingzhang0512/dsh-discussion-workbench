@@ -16,6 +16,9 @@ export class WorkbenchBridge {
 
   state(sessionId: string, state: WorkbenchState): void { this.send(sessionId, { type: 'state', state }) }
   error(sessionId: string, message: string): void { this.send(sessionId, { type: 'error', message }) }
+  result(sessionId: string, requestId: string, ok: boolean, message: string): void {
+    this.send(sessionId, { type: 'operation-result', requestId, ok, message })
+  }
 
   private send(sessionId: string, message: HostMessage): void {
     const body = JSON.stringify(message)

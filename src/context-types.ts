@@ -6,6 +6,7 @@ import type { IncomingMessage } from 'node:http'
 export interface StructuredDocumentServiceShape {
   setCurrentFile(sessionId: string, filePath: string | null): void
   bindCurrentFile(sessionId: string, filePath: string): Promise<boolean>
+  unbindCurrentFile(sessionId: string): Promise<void>
   ensureBound(sessionId: string): Promise<boolean>
   getDocumentSnapshot(sessionId: string): null | {
     document: { title: string, revision: number, root: DocNodeShape }
@@ -21,14 +22,22 @@ export interface StructuredDocumentServiceShape {
 }
 
 export interface SidebarControllerServiceShape {
-  getState(sessionId: string): { currentFile: string | null, connected: boolean } | undefined
-  subscribe(sessionId: string, listener: (state: { currentFile: string | null, connected: boolean }) => void): () => void
+  getState(sessionId: string): SidebarControllerStateShape | undefined
+  subscribe(sessionId: string, listener: (state: SidebarControllerStateShape) => void): () => void
+}
+
+export interface SidebarControllerStateShape {
+  currentFile: string | null
+  fileCandidate?: string | null
+  fileCandidateSource?: 'current' | 'recent' | null
+  workspaceRoot?: string | null
+  connected: boolean
 }
 
 export interface StructuredDocumentViewServiceShape {
   getState(sessionId: string): { connected: boolean, state: { currentView: 'markdown' | 'mindmap' | 'table' } | null } | undefined
   subscribe(sessionId: string, listener: (state: { connected: boolean, state: { currentView: 'markdown' | 'mindmap' | 'table' } | null } | undefined) => void): () => void
-  dispatch(sessionId: string, command: { name: 'set_view', view: 'markdown' | 'mindmap' | 'table' } | { name: 'focus_node', node: string, mode: 'visible' | 'center' }): Promise<unknown>
+  dispatch(sessionId: string, command: { name: 'set_view', view: 'markdown' | 'mindmap' | 'table' } | { name: 'focus_node', node: string, mode: 'visible' | 'center' } | { name: 'open_tab' }): Promise<unknown>
 }
 
 interface DocNodeShape { id: string, title: string, children: DocNodeShape[] }

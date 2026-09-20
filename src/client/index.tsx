@@ -155,7 +155,7 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
           {state?.targetFile && <button type="button" disabled={pending !== null || !connected} onClick={() => submitContext({ targetFile: null }, '正在解除整理目标…')}>解除</button>}
         </div>
         <div className="dwb-row">
-          <label>参考材料</label><input value={materialPath} onChange={event => setMaterialPath(event.target.value)} placeholder=".md 或 .txt 路径" />
+          <label>参考材料</label><input value={materialPath} onChange={event => setMaterialPath(event.target.value)} placeholder=".md / .txt / .json 路径" />
           <button type="button" disabled={pending !== null || !connected} onClick={() => submitContext({ addPath: materialPath }, '正在添加参考材料…', true)}>添加文件</button>
           <button type="button" onClick={() => setPasteOpen(value => !value)}>粘贴文字</button>
         </div>
@@ -201,16 +201,16 @@ function FileCandidate({ state, connected, pending, submit }: {
   const source = browser?.fileCandidateSource === 'recent' ? '最近浏览' : '当前浏览'
   const extension = candidate?.match(/\.[^.\\/]+$/)?.[0].toLowerCase() ?? ''
   const targetAllowed = extension === '.md' || extension === '.markdown'
-  const materialAllowed = targetAllowed || extension === '.txt'
+  const materialAllowed = targetAllowed || extension === '.txt' || extension === '.json'
   const isTarget = samePath(candidate, state?.targetFile)
   const isMaterial = state?.materials.some(item => samePath(item.path, candidate)) ?? false
   const baseDisabled = !connected || browser?.connected !== true || candidate === null || pending
   const reason = !connected ? '工作台已断线' : browser?.connected !== true ? '侧边栏未连接' : !hasContract ? '请升级侧边栏控制器；仍可使用下方路径输入' : candidate === null ? '请先打开或激活一个文件' : ''
-  const formatReason = candidate !== null && !materialAllowed ? '该文件类型不能设为目标或材料' : candidate !== null && !targetAllowed ? 'TXT 只能添加为参考材料' : ''
+  const formatReason = candidate !== null && !materialAllowed ? '该文件类型不能设为目标或材料' : candidate !== null && !targetAllowed ? 'TXT/JSON 只能添加为参考材料' : ''
   return <div className="dwb-file-candidate" title={candidate ?? reason}>
     <span className="dwb-meta"><strong>{source}：</strong>{candidate === null ? (reason || '未选择文件') : displayPath(candidate, browser?.workspaceRoot)}</span>
     <button type="button" disabled={baseDisabled || !targetAllowed || isTarget} title={reason || (!targetAllowed ? '整理目标仅支持 Markdown' : '')} onClick={() => submit({ targetFile: candidate }, '正在设置整理目标…')}>{isTarget ? '当前目标' : '设为整理目标'}</button>
-    <button type="button" disabled={baseDisabled || !materialAllowed || isMaterial} title={reason || (!materialAllowed ? '参考材料支持 Markdown 和 TXT' : '')} onClick={() => submit({ addPath: candidate }, '正在添加参考材料…')}>{isMaterial ? '已添加' : '添加为参考材料'}</button>
+    <button type="button" disabled={baseDisabled || !materialAllowed || isMaterial} title={reason || (!materialAllowed ? '参考材料支持 Markdown、TXT 和 JSON' : '')} onClick={() => submit({ addPath: candidate }, '正在添加参考材料…')}>{isMaterial ? '已添加' : '添加为参考材料'}</button>
     {formatReason && <span className="dwb-file-reason">{formatReason}</span>}
   </div>
 }

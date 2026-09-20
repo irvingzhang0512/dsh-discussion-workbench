@@ -44,6 +44,23 @@ describe('WorkbenchStore', () => {
     } finally { await env.cleanup() }
   })
 
+  it('JSON 可作为参考材料;目标仍仅限 Markdown', async () => {
+    const env = await fixture()
+    try {
+      await writeFile(join(env.root, 'pm.json'), '{"sheets": []}', 'utf8')
+      await writeFile(join(env.root, 'plan.docx'), 'binary', 'utf8')
+      const state = await env.store.update('session-a', { addPath: 'pm.json' })
+      expect(state.materials).toHaveLength(1)
+      expect(state.materials[0]!.label).toBe('pm.json')
+      const read = await env.store.readMaterial('session-a', state.materials[0]!.id, 0, 100)
+      expect(read.content).toBe('{"sheets": []}')
+      // 不支持的扩展名被拒绝;目标必须是 .md/.markdown
+      await expect(env.store.update('session-a', { addPath: 'plan.docx' })).rejects.toThrow('不支持的文件格式')
+      await expect(env.store.update('session-a', { targetFile: 'pm.json' })).rejects.toThrow('不支持的文件格式')
+      expect((await env.store.get('session-a')).materials).toHaveLength(1)
+    } finally { await env.cleanup() }
+  })
+
   it('隔离会话并拒绝工作区外路径', async () => {
     const env = await fixture()
     const outside = await mkdtemp(join(tmpdir(), 'dwb-outside-'))

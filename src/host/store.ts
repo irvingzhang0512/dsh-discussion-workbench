@@ -45,7 +45,7 @@ export class WorkbenchStore {
       if (state.targetFile === null) { state.document = null; state.lastChange = null }
     }
     if (patch.addPath !== undefined && patch.addPath !== '') {
-      const path = await this.resolveAllowed(sessionId, patch.addPath, ['.md', '.markdown', '.txt'])
+      const path = await this.resolveAllowed(sessionId, patch.addPath, ['.md', '.markdown', '.txt', '.json'])
       if (!state.materials.some(material => material.path === path)) state.materials.push({ id: randomUUID(), label: path.split(/[\\/]/).at(-1) ?? path, kind: 'file', path, addedAt: Date.now() })
     }
     if (patch.paste !== undefined) {
@@ -111,7 +111,7 @@ export class WorkbenchStore {
     }
     state.targetBinding = 'unbound'
     state.materials = (await Promise.all(state.materials.map(async material => {
-      try { await this.resolveAllowed(sessionId, material.path, ['.md', '.markdown', '.txt']); return material } catch { return null }
+      try { await this.resolveAllowed(sessionId, material.path, ['.md', '.markdown', '.txt', '.json']); return material } catch { return null }
     }))).filter((material): material is WorkbenchMaterial => material !== null)
     this.states.set(sessionId, state)
     this.loads.delete(sessionId)

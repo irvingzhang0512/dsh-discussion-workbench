@@ -212,7 +212,7 @@ export function apply(ctx: Context): void {
       const state = store.peek(id)
       if (state === undefined) return ''
       const materialList = state.materials.map(item => `${item.id}:${item.label}`).join('、') || '无'
-      return [
+      const lines = [
         '[讨论工作台上下文]',
         `场景:${state.scene === 'meeting' ? '会议整理' : '项目更新'}`,
         `固定整理目标:${state.targetFile ?? '未设置'}`,
@@ -220,7 +220,13 @@ export function apply(ctx: Context): void {
         `当前节点:${state.document?.selectedNodeTitle ?? '无'}${state.document?.selectedNodeId ? `(${state.document.selectedNodeId})` : ''}`,
         `参考材料:${materialList}`,
         '普通讨论不要写文档；明确整理或修改时先锁定以上目标与版本。',
-      ].join('\n')
+      ]
+      if (state.scene === 'project') {
+        lines.push(
+          '项目更新规则:保留用户没有要求改变的节点及其 ID;负责人、日期、进度与结论缺失依据时写「待确认」,不编造;状态仅用 未开始/进行中/已完成/已取消/有风险/阻塞/暂停;修改主文档业务数据后提醒同步 Excel 视图(uv run python scripts/pm_doc_bridge.py to-excel)。',
+        )
+      }
+      return lines.join('\n')
     },
   })
 
@@ -233,7 +239,8 @@ export function apply(ctx: Context): void {
       name: 'discussion-workbench', description: '会议整理与项目更新的统一讨论工作台。',
       whenToUse: '用户要讨论、整理会议纪要、维护项目计划或管理参考材料时。', content: body,
       invocation: { modelInvocable: true, userInvocable: true },
-    } as never)
+      source: 'bundled',
+    })
   }).catch(error => ctx.logger?.warn?.(`[discussion-workbench] Skill 加载失败:${String(error)}`))
 
   const wss = new WebSocketServer({ noServer: true })

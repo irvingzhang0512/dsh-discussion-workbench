@@ -41,7 +41,7 @@ export function registerWorkbenchTools(ctx: { tools: { register(tool: unknown): 
       parameters: {
         scene: { type: 'string', enum: ['meeting', 'project'], description: '场景。' },
         target_file: { type: 'string', description: '固定整理目标 Markdown；空字符串清除目标。' },
-        add_material_path: { type: 'string', description: '添加一个工作区内的 Markdown/TXT 参考材料。' },
+        add_material_path: { type: 'string', description: '添加一个工作区内的 Markdown/TXT/JSON 参考材料。' },
         pasted_material: { type: 'json', description: '保存粘贴材料：{label,content}。' },
         remove_material_id: { type: 'string', description: '移除参考材料 ID。' },
       },

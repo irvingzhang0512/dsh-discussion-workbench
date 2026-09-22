@@ -45,6 +45,13 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
   const [pasteOpen, setPasteOpen] = useState(false)
   const [pasteLabel, setPasteLabel] = useState('粘贴材料')
   const [pasteContent, setPasteContent] = useState('')
+  const [meetingFolder, setMeetingFolder] = useState('')
+  const [docxPath, setDocxPath] = useState('')
+  const [sourceQuery, setSourceQuery] = useState('')
+  const [sourceText, setSourceText] = useState('')
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editContent, setEditContent] = useState('')
   const socket = useMemo(() => ({ current: null as WebSocket | null }), [id])
 
   useEffect(() => {
@@ -61,7 +68,7 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
       ws.onmessage = event => {
         if (stopped || socket.current !== ws) return
         try {
-          const message = JSON.parse(String(event.data)) as { type: string, state?: WorkbenchState, message?: string }
+          const message = JSON.parse(String(event.data)) as { type: string, state?: WorkbenchState, message?: string, requestId?: string, ok?: boolean, label?: string, content?: string }
           if (message.type === 'state' && message.state !== undefined) {
             const previous = targets.get(id)
             targets.set(id, message.state.targetFile)
@@ -85,6 +92,10 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
             }
             else setError(result.message ?? '工作台操作失败')
           } else if (message.type === 'error') setError(message.message ?? '工作台操作失败')
+          else if (message.type === 'source-content') {
+            if (message.ok) { setSourceText(`${message.label ?? '原文'}\n\n${message.content ?? ''}`); setError('') }
+            else setError(message.message ?? '读取原文失败')
+          }
         } catch { setError('工作台返回了无法解析的状态。') }
       }
       ws.onclose = () => {
@@ -135,6 +146,15 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
       {pending && <div className="dwb-task is-saving">{pending.label}</div>}
       {notice && <div className="dwb-notice">{notice}</div>}
       {expanded && <div className="dwb-panel">
+        <div className="dwb-meeting">
+          <label>会议文件夹</label><input value={meetingFolder} onChange={event => setMeetingFolder(event.target.value)} placeholder="工作区内的会议文件夹" />
+          <button type="button" disabled={!connected || pending !== null} onClick={() => submitMeeting(send, 'open-meeting', { folder: meetingFolder }, '正在打开会议…')}>打开会议</button>
+          {state?.meeting && <><button className={state.meeting.activeDocument === 'record' ? 'is-active' : ''} type="button" onClick={() => submitMeeting(send, 'select-record', {}, '正在切换会议记录…')}>会议记录</button><button className={state.meeting.activeDocument === 'minutes' ? 'is-active' : ''} type="button" disabled={state.meeting.minutesFile === null} onClick={() => submitMeeting(send, 'select-minutes', {}, '正在切换会议纪要…')}>会议纪要</button><button type="button" onClick={() => submitMeeting(send, 'toggle-reference', {}, '正在切换原文对照…')}>{state.meeting.referencePanelOpen ? '收起原文' : '查看原文'}</button></>}
+        </div>
+        {state?.meeting && <MeetingPanel state={state} send={send} docxPath={docxPath} setDocxPath={setDocxPath} sourceQuery={sourceQuery} setSourceQuery={setSourceQuery} sourceText={sourceText} />}
+        {state?.document?.selectedNodeId && <div className="dwb-node-editor">
+          {!editorOpen ? <button type="button" onClick={() => { setEditTitle(state.document!.selectedNodeTitle ?? ''); setEditContent(state.document!.selectedNodeContent ?? ''); setEditorOpen(true) }}>编辑当前节点</button> : <><input value={editTitle} onChange={event => setEditTitle(event.target.value)} aria-label="节点标题" /><textarea value={editContent} onChange={event => setEditContent(event.target.value)} aria-label="节点正文" /><button type="button" onClick={() => { send({ type: 'edit-node', requestId: globalThis.crypto.randomUUID(), nodeId: state.document!.selectedNodeId, title: editTitle, content: editContent, expectedRevision: state.document!.revision }); setEditorOpen(false) }}>保存当前节点</button><button type="button" onClick={() => setEditorOpen(false)}>取消</button></>}
+        </div>}
         <div className="dwb-row">
           <label>场景</label>
           <select value={state?.scene ?? 'meeting'} onChange={event => send({ type: 'set-context', scene: event.target.value as WorkbenchScene })}>
@@ -175,6 +195,26 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
       </div>}
     </div>
   )
+}
+
+function submitMeeting(send: (message: object) => void, action: 'open-meeting' | 'select-record' | 'select-minutes' | 'toggle-reference' | 'save-info' | 'import-docx' | 'export-pdf', fields: object, _label: string): void {
+  send({ type: 'meeting-action', requestId: globalThis.crypto.randomUUID(), action, ...fields })
+}
+
+function MeetingPanel({ state, send, docxPath, setDocxPath, sourceQuery, setSourceQuery, sourceText }: { state: WorkbenchState, send: (message: object) => void, docxPath: string, setDocxPath: (value: string) => void, sourceQuery: string, setSourceQuery: (value: string) => void, sourceText: string }): React.ReactElement {
+  const meeting = state.meeting!
+  const [info, setInfo] = useState(meeting.info)
+  useEffect(() => setInfo(meeting.info), [meeting.info])
+  const readSource = (): void => {
+    const source = state.materials[0]
+    if (source === undefined) return
+    send({ type: 'read-source', requestId: globalThis.crypto.randomUUID(), materialId: source.id, query: sourceQuery })
+  }
+  return <>
+    <div className="dwb-meeting-info"><label>主题</label><input value={info.topic} onChange={event => setInfo({ ...info, topic: event.target.value })} placeholder="会议主题" /><input value={info.date} onChange={event => setInfo({ ...info, date: event.target.value })} placeholder="日期 YYYY-MM-DD" /><input value={info.time} onChange={event => setInfo({ ...info, time: event.target.value })} placeholder="时间" /><input value={info.location} onChange={event => setInfo({ ...info, location: event.target.value })} placeholder="地点" /><input value={info.attendees} onChange={event => setInfo({ ...info, attendees: event.target.value })} placeholder="参会人" /><input value={info.recorder} onChange={event => setInfo({ ...info, recorder: event.target.value })} placeholder="记录人" /><button type="button" onClick={() => submitMeeting(send, 'save-info', { info }, '正在保存会议信息…')}>保存信息</button></div>
+    <div className="dwb-row"><label>导入 DOCX</label><input value={docxPath} onChange={event => setDocxPath(event.target.value)} placeholder="会议文件夹内的 .docx" /><button type="button" onClick={() => submitMeeting(send, 'import-docx', { docxPath }, '正在导入 DOCX…')}>转换并添加</button><button type="button" disabled={meeting.minutesFile === null} onClick={() => submitMeeting(send, 'export-pdf', {}, '正在导出 PDF…')}>导出 PDF</button></div>
+    {meeting.referencePanelOpen && <div className="dwb-source"><div><strong>原文对照</strong><input value={sourceQuery} onChange={event => setSourceQuery(event.target.value)} placeholder="输入关键词或时间戳" /><button type="button" disabled={state.materials.length === 0} onClick={readSource}>显示原文</button></div><pre>{sourceText || '选择参考材料后，可按关键词或时间戳查看原文。'}</pre></div>}
+  </>
 }
 
 function shortName(path: string | null | undefined): string { return path?.split(/[\\/]/).at(-1) ?? '' }
@@ -227,6 +267,8 @@ function injectStyle(): void {
 .dwb-shell{font-size:12px;border:1px solid rgba(128,128,128,.24);border-radius:10px;background:var(--background,#fff);color:inherit;overflow:hidden;margin-bottom:6px}
 .dwb-summary{display:flex;width:100%;gap:4px;align-items:center;border:0;background:transparent;color:inherit;padding:7px 10px;text-align:left;cursor:pointer}.dwb-dot{width:7px;height:7px;border-radius:50%;background:#aaa;flex:none}.dwb-dot.is-online{background:#35a45b}.dwb-sep,.dwb-meta{opacity:.5}.dwb-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dwb-caret{margin-left:auto;opacity:.55}.dwb-panel{display:grid;gap:7px;padding:9px 10px;border-top:1px solid rgba(128,128,128,.2)}.dwb-row{display:flex;gap:6px;align-items:center}.dwb-row label{width:58px;opacity:.7}.dwb-row input{min-width:100px;flex:1}.dwb-row input,.dwb-row select,.dwb-paste input,.dwb-paste textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-row button,.dwb-paste button,.dwb-change button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-row button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-spacer{flex:1}.dwb-paste{display:grid;grid-template-columns:150px 1fr auto;gap:6px}.dwb-paste textarea{min-height:54px;resize:vertical}.dwb-materials{display:flex;gap:5px;flex-wrap:wrap}.dwb-chip{background:rgba(79,110,247,.1);padding:3px 7px;border-radius:10px}.dwb-chip button{border:0;background:transparent;color:inherit;cursor:pointer;margin-left:4px}.dwb-task{padding:5px 10px;background:rgba(79,110,247,.09);border-top:1px solid rgba(128,128,128,.14)}.dwb-task.is-failed,.dwb-error{padding:5px 10px;background:rgba(220,50,50,.1);color:#b52828}.dwb-change{display:grid;grid-template-columns:1fr auto;gap:3px 8px;padding:7px;border:1px solid rgba(53,164,91,.25);border-radius:7px;background:rgba(53,164,91,.06)}.dwb-change div:nth-child(2){grid-column:1}.dwb-change button{grid-column:2;grid-row:1/3}.dwb-metrics,.dwb-hints{opacity:.65;border-top:1px solid rgba(128,128,128,.15);padding-top:6px}
 .dwb-file-candidate{display:flex;align-items:center;gap:6px;min-width:0;flex:1}.dwb-file-candidate .dwb-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8}.dwb-file-candidate button{white-space:nowrap;border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-file-reason{font-size:11px;opacity:.62;white-space:nowrap}.dwb-row button:disabled,.dwb-file-candidate button:disabled{cursor:not-allowed;opacity:.45}.dwb-notice{padding:5px 10px;background:rgba(53,164,91,.08);color:#287a43}@media(max-width:680px){.dwb-file-candidate{flex-wrap:wrap}.dwb-file-candidate .dwb-meta{flex-basis:100%}}
+.dwb-meeting,.dwb-meeting-info{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;border:1px solid rgba(79,110,247,.24);border-radius:7px}.dwb-meeting input{flex:1;min-width:180px}.dwb-meeting-info input{min-width:100px;flex:1}.dwb-meeting button,.dwb-meeting-info button,.dwb-source button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-meeting button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-source{border:1px solid rgba(128,128,128,.25);border-radius:7px;padding:7px}.dwb-source>div{display:flex;gap:6px;align-items:center}.dwb-source input{flex:1;min-width:120px}.dwb-source pre{max-height:260px;overflow:auto;white-space:pre-wrap;line-height:1.45;margin:7px 0 0;background:rgba(128,128,128,.06);padding:7px}
+.dwb-node-editor{display:grid;grid-template-columns:1fr auto auto;gap:6px;border:1px solid rgba(53,164,91,.26);border-radius:7px;padding:7px}.dwb-node-editor input,.dwb-node-editor textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-node-editor textarea{grid-column:1/-1;min-height:88px;resize:vertical}.dwb-node-editor button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
 `
   document.head.appendChild(style)
 }

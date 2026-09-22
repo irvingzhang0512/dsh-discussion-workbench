@@ -1,7 +1,12 @@
 import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
-import type { WorkbenchMaterial, WorkbenchScene, WorkbenchState } from '../shared/types.ts'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import type { MeetingInfo, MeetingWorkspace, WorkbenchMaterial, WorkbenchScene, WorkbenchState } from '../shared/types.ts'
+
+const execFileAsync = promisify(execFile)
+const EMPTY_MEETING_INFO: MeetingInfo = { date: '', time: '', location: '', attendees: '', topic: '', recorder: '' }
 
 export interface StoreOptions {
   cwd(sessionId: string): string
@@ -68,6 +73,69 @@ export class WorkbenchStore {
     return this.resolveAllowed(sessionId, raw, ['.md', '.markdown'])
   }
 
+  async openMeeting(sessionId: string, rawFolder: string): Promise<WorkbenchState> {
+    const folder = await this.resolveFolder(sessionId, rawFolder)
+    const metadataPath = join(folder, '.meeting-workbench.json')
+    let meeting: MeetingWorkspace = {
+      folder, recordFile: null, minutesFile: null, activeDocument: 'record', phase: 'materials',
+      info: { ...EMPTY_MEETING_INFO }, sourceLinks: [], pendingSync: [], referencePanelOpen: false, pdf: null,
+    }
+    try {
+      const saved = JSON.parse(await readFile(metadataPath, 'utf8')) as Partial<MeetingWorkspace>
+      meeting = { ...meeting, ...saved, folder, info: { ...EMPTY_MEETING_INFO, ...saved.info }, sourceLinks: saved.sourceLinks ?? [], pendingSync: saved.pendingSync ?? [] }
+    } catch { /* existing folders do not require metadata */ }
+    for (const candidate of ['会议记录.md', '会议纪要.md']) {
+      try {
+        const path = await this.resolveAllowed(sessionId, join(folder, candidate), ['.md', '.markdown'])
+        if (candidate === '会议记录.md') meeting.recordFile = path
+        else meeting.minutesFile = path
+      } catch { /* file has not been generated yet */ }
+    }
+    const state = structuredClone(await this.get(sessionId))
+    state.scene = 'meeting'; state.meeting = meeting
+    const preferred = meeting.activeDocument === 'minutes' ? meeting.minutesFile : meeting.recordFile
+    if (preferred !== null) { state.targetFile = preferred; state.targetBinding = 'bound' }
+    state.updatedAt = Date.now(); await this.persistMeeting(meeting); await this.persist(state)
+    this.states.set(sessionId, state); this.options.onChange(sessionId, structuredClone(state))
+    return state
+  }
+
+  async updateMeeting(sessionId: string, patch: { activeDocument?: 'record' | 'minutes', referencePanelOpen?: boolean, info?: Partial<MeetingInfo>, pdf?: MeetingWorkspace['pdf'] }): Promise<WorkbenchState> {
+    const state = structuredClone(await this.get(sessionId))
+    if (state.meeting === null) throw new Error('请先打开会议文件夹。')
+    const meeting = state.meeting
+    if (patch.activeDocument !== undefined) {
+      meeting.activeDocument = patch.activeDocument
+      const target = patch.activeDocument === 'record' ? meeting.recordFile : meeting.minutesFile
+      if (target === null) throw new Error(patch.activeDocument === 'record' ? '会议记录尚未生成。' : '会议纪要尚未生成。')
+      state.targetFile = target; state.targetBinding = 'bound'
+    }
+    if (patch.referencePanelOpen !== undefined) meeting.referencePanelOpen = patch.referencePanelOpen
+    if (patch.info !== undefined) meeting.info = { ...meeting.info, ...patch.info }
+    if (patch.pdf !== undefined) meeting.pdf = patch.pdf
+    state.updatedAt = Date.now(); await this.persistMeeting(meeting); await this.persist(state)
+    this.states.set(sessionId, state); this.options.onChange(sessionId, structuredClone(state))
+    return state
+  }
+
+  async importDocx(sessionId: string, rawDocx: string): Promise<{ state: WorkbenchState, material: WorkbenchMaterial, converted: boolean }> {
+    const docx = await this.resolveAllowed(sessionId, rawDocx, ['.docx'])
+    const state = await this.get(sessionId)
+    if (state.meeting === null) throw new Error('请先打开会议文件夹。')
+    if (dirname(docx) !== state.meeting.folder) throw new Error('DOCX 必须位于当前会议文件夹。')
+    const output = docx.replace(/\.docx$/i, '.md')
+    let converted = false
+    try { await stat(output) } catch {
+      const script = join(this.options.cwd(sessionId), 'convert-docx-to-md.ps1')
+      await execFileAsync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-InputPath', docx, '-OutputPath', output], { windowsHide: true })
+      converted = true
+    }
+    const next = await this.update(sessionId, { addPath: output })
+    const material = next.materials.find(item => item.path.toLowerCase() === output.toLowerCase())
+    if (material === undefined) throw new Error('转换完成，但无法登记材料。')
+    return { state: next, material, converted }
+  }
+
   async readMaterial(sessionId: string, materialId: string, offset: number, maxChars: number): Promise<{ material: WorkbenchMaterial, content: string, offset: number, nextOffset: number, truncated: boolean }> {
     const state = await this.get(sessionId)
     const material = state.materials.find(item => item.id === materialId)
@@ -101,7 +169,7 @@ export class WorkbenchStore {
   }
 
   private async load(sessionId: string): Promise<WorkbenchState> {
-    let state: WorkbenchState = { sessionId, scene: 'meeting', targetFile: null, targetBinding: 'unbound', materials: [], task: { phase: 'idle', label: '' }, lastChange: null, document: null, browser: null, view: null, metrics: { modelToolRounds: 0 }, connected: false, updatedAt: Date.now() }
+    let state: WorkbenchState = { sessionId, scene: 'meeting', targetFile: null, targetBinding: 'unbound', materials: [], meeting: null, task: { phase: 'idle', label: '' }, lastChange: null, document: null, browser: null, view: null, metrics: { modelToolRounds: 0 }, connected: false, updatedAt: Date.now() }
     try {
       const parsed = JSON.parse(await readFile(this.statePath(sessionId), 'utf8')) as WorkbenchState
       if (parsed.sessionId === sessionId) state = { ...state, ...parsed, browser: null, view: null, metrics: { ...parsed.metrics, modelToolRounds: parsed.metrics?.modelToolRounds ?? 0 }, connected: false }
@@ -119,6 +187,21 @@ export class WorkbenchStore {
   }
 
   private statePath(sessionId: string): string { return join(this.options.cwd(sessionId), '.dsh-workbench', 'sessions', `${safeSession(sessionId)}.json`) }
+
+  private async persistMeeting(meeting: MeetingWorkspace): Promise<void> {
+    const path = join(meeting.folder, '.meeting-workbench.json')
+    const temp = `${path}.tmp-${process.pid}-${randomUUID()}`
+    await writeFile(temp, JSON.stringify(meeting, null, 2) + '\n', 'utf8')
+    try { await rename(temp, path) } catch (error) { await unlink(temp).catch(() => {}); throw error }
+  }
+
+  private async resolveFolder(sessionId: string, raw: string): Promise<string> {
+    const root = resolve(this.options.cwd(sessionId)); const path = resolve(isAbsolute(raw) ? raw : join(root, raw))
+    await this.assertInside(sessionId, path)
+    const canonical = await realpath(path); await this.assertInside(sessionId, canonical)
+    if (!(await stat(canonical)).isDirectory()) throw new Error(`不是会议文件夹:${path}`)
+    return canonical
+  }
 
   private async resolveAllowed(sessionId: string, raw: string, extensions: string[]): Promise<string> {
     const root = resolve(this.options.cwd(sessionId))

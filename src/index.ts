@@ -1,4 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile, stat } from 'node:fs/promises'
+import { basename, dirname, join } from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -14,6 +17,7 @@ export const name = 'dsh-discussion-workbench'
 export const inject = ['tools', 'skills', 'sessions', 'webServer', 'webRuntime', 'systemPrompt', 'structuredDocument', 'sidebarController', 'structuredDocumentView']
 export const Config = z.object({})
 export const BRIDGE_PATH = '/discussion-workbench/ws'
+const execFileAsync = promisify(execFile)
 
 export function apply(ctx: Context): void {
   const bridge = new WorkbenchBridge()
@@ -33,12 +37,12 @@ export function apply(ctx: Context): void {
   const contextRequestResults = new Map<string, { ok: boolean, message: string }>()
   const contextRequestTasks = new Map<string, Promise<{ ok: boolean, message: string }>>()
 
-  const findNodeTitle = (root: { id: string, title: string, children: typeof root[] }, id: string | null): string | null => {
+  const findNode = (root: { id: string, title: string, content: string, children: typeof root[] }, id: string | null): { title: string, content: string } | null => {
     if (id === null) return null
     const stack = [root]
     while (stack.length > 0) {
       const node = stack.pop()!
-      if (node.id === id) return node.title
+      if (node.id === id) return { title: node.title, content: node.content }
       stack.push(...node.children)
     }
     return null
@@ -51,9 +55,10 @@ export function apply(ctx: Context): void {
     const snapshot = candidate?.currentFile === targetFile ? candidate : null
     if (change?.action !== undefined) pendingViewRefresh.set(sessionId, Date.now())
     await store.mutateRuntime(sessionId, state => {
+      const selectedNode = snapshot === null ? null : findNode(snapshot.document.root, snapshot.selectedNodeId)
       state.document = snapshot === null ? null : {
         title: snapshot.document.title, revision: snapshot.document.revision,
-        selectedNodeId: snapshot.selectedNodeId, selectedNodeTitle: findNodeTitle(snapshot.document.root, snapshot.selectedNodeId),
+        selectedNodeId: snapshot.selectedNodeId, selectedNodeTitle: selectedNode?.title ?? null, selectedNodeContent: selectedNode?.content ?? null,
         dirty: snapshot.dirty, undoDepth: snapshot.undoDepth,
       }
       if (change?.action !== undefined && snapshot !== null) {
@@ -153,7 +158,11 @@ export function apply(ctx: Context): void {
     return store.get(sessionId)
   })
 
-  const toolsDisposer = registerWorkbenchTools(ctx, { store, setContext })
+  const toolsDisposer = registerWorkbenchTools(ctx, { store, setContext, openMeeting: async (sessionId, folder) => {
+    const state = await store.openMeeting(sessionId, folder)
+    await queueReconcile(sessionId)
+    return state
+  } })
   const removeService = ctx.provide('discussionWorkbench', {
     id: 'dsh-discussion-workbench' as const,
     getContext: (sessionId: string) => store.get(sessionId),
@@ -292,6 +301,59 @@ export function apply(ctx: Context): void {
         if (viewService === undefined) { bridge.error(sessionId, '结构化文档视图服务不可用。'); return }
         void viewService.dispatch(sessionId, { name: 'set_view', view: message.view }).catch(error => bridge.error(sessionId, String(error)))
       }
+      if (message.type === 'edit-node') {
+        if (documentService === undefined) { bridge.error(sessionId, '结构化文档服务不可用。'); return }
+        const target = store.peek(sessionId)?.targetFile
+        if (target === null || target === undefined) { bridge.error(sessionId, '没有可编辑的整理目标。'); return }
+        void documentService.updateNode(sessionId, { nodeId: message.nodeId, title: message.title, content: message.content, expectedFile: target, expectedRevision: message.expectedRevision })
+          .then(() => message.requestId !== undefined && bridge.result(sessionId, message.requestId, true, '节点已保存。'))
+          .catch(error => message.requestId !== undefined ? bridge.result(sessionId, message.requestId, false, error instanceof Error ? error.message : String(error)) : bridge.error(sessionId, String(error)))
+        return
+      }
+      if (message.type === 'read-source') {
+        void (async () => {
+          try {
+            const state = await store.get(sessionId)
+            const material = state.materials.find(item => item.id === message.materialId)
+            if (material === undefined) throw new Error('未找到原文材料。')
+            const full = await store.readMaterial(sessionId, material.id, 0, 20_000)
+            const query = message.query?.trim()
+            const content = query === undefined || query === '' ? full.content : locateSource(full.content, query)
+            bridge.source(sessionId, message.requestId, { ok: true, label: material.label, content })
+          } catch (error) { bridge.source(sessionId, message.requestId, { ok: false, message: error instanceof Error ? error.message : String(error) }) }
+        })()
+        return
+      }
+      if (message.type === 'meeting-action') {
+        const run = async (): Promise<string> => {
+          switch (message.action) {
+            case 'open-meeting':
+              if (message.folder === undefined || message.folder === '') throw new Error('请选择会议文件夹。')
+              await store.openMeeting(sessionId, message.folder); await queueReconcile(sessionId); return '会议已打开。'
+            case 'select-record': await store.updateMeeting(sessionId, { activeDocument: 'record' }); await queueReconcile(sessionId); return '已切换到会议记录。'
+            case 'select-minutes': await store.updateMeeting(sessionId, { activeDocument: 'minutes' }); await queueReconcile(sessionId); return '已切换到会议纪要。'
+            case 'toggle-reference': {
+              const current = (await store.get(sessionId)).meeting
+              if (current === null) throw new Error('请先打开会议文件夹。')
+              await store.updateMeeting(sessionId, { referencePanelOpen: !current.referencePanelOpen }); return current.referencePanelOpen ? '已收起原文对照。' : '已打开原文对照。'
+            }
+            case 'save-info': await store.updateMeeting(sessionId, { info: message.info }); return '会议信息已保存。'
+            case 'import-docx': {
+              if (message.docxPath === undefined || message.docxPath === '') throw new Error('请选择 DOCX 文件。')
+              const result = await store.importDocx(sessionId, message.docxPath)
+              return result.converted ? `已转换并添加材料：${result.material.label}` : `已复用并添加材料：${result.material.label}`
+            }
+            case 'export-pdf': return exportMinutesPdf(sessionId, store, message.overwrite === true)
+          }
+        }
+        void run().then(value => {
+          if (message.requestId !== undefined) bridge.result(sessionId, message.requestId, true, value)
+        }, error => {
+          const value = error instanceof Error ? error.message : String(error)
+          if (message.requestId !== undefined) bridge.result(sessionId, message.requestId, false, value)
+          else bridge.error(sessionId, value)
+        })
+      }
     })
     ws.on('close', () => { detach(); void store.mutateRuntime(sessionId, state => { state.connected = false }) })
     ws.on('error', () => detach())
@@ -308,3 +370,50 @@ export function apply(ctx: Context): void {
 }
 
 export default apply
+
+async function exportMinutesPdf(sessionId: string, store: WorkbenchStore, overwrite: boolean): Promise<string> {
+  const state = await store.get(sessionId)
+  const meeting = state.meeting
+  if (meeting === null || meeting.minutesFile === null) throw new Error('请先生成并保存会议纪要。')
+  const markdown = await readFile(meeting.minutesFile, 'utf8')
+  const title = meeting.info.topic || basename(meeting.minutesFile, '.md').replace(/会议纪要$/, '') || '会议纪要'
+  const date = meeting.info.date || new Date().toISOString().slice(0, 10)
+  const stem = `${date}_${title}`.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-')
+  let output = join(meeting.folder, `${stem}.pdf`)
+  if (!overwrite) {
+    let index = 2
+    while (await stat(output).then(() => true, () => false)) output = join(meeting.folder, `${stem}_${index++}.pdf`)
+  }
+  const htmlPath = join(meeting.folder, `.meeting-preview-${process.pid}.html`)
+  await writeFile(htmlPath, renderPdfHtml(title, markdown), 'utf8')
+  const browser = ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe']
+  let executable: string | undefined
+  for (const candidate of browser) if (await stat(candidate).then(() => true, () => false)) { executable = candidate; break }
+  if (executable === undefined) throw new Error('未找到 Microsoft Edge，无法导出 PDF。')
+  try {
+    await execFileAsync(executable, ['--headless=new', '--disable-gpu', `--print-to-pdf=${output}`, `file:///${htmlPath.replace(/\\/g, '/')}`], { windowsHide: true, timeout: 60_000 })
+  } finally {
+    await import('node:fs/promises').then(fs => fs.unlink(htmlPath)).catch(() => undefined)
+  }
+  await store.updateMeeting(sessionId, { pdf: { path: output, revision: state.document?.revision ?? 0 } })
+  return `PDF 已导出：${output}`
+}
+
+function renderPdfHtml(title: string, markdown: string): string {
+  const escaped = markdown.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const body = escaped.split(/\r?\n/).map(line => {
+    if (/^# /.test(line)) return `<h1>${line.slice(2)}</h1>`
+    if (/^## /.test(line)) return `<h2>${line.slice(3)}</h2>`
+    if (/^### /.test(line)) return `<h3>${line.slice(4)}</h3>`
+    if (/^[-*] /.test(line)) return `<p class="item">${line.slice(2)}</p>`
+    if (line.trim() === '') return ''
+    return `<p>${line}</p>`
+  }).join('\n')
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${title}</title><style>@page{size:A4;margin:22mm 22mm 20mm}body{font-family:SimSun,"宋体",serif;font-size:12pt;line-height:1.5;color:#111}h1{font-family:SimHei,"黑体",sans-serif;font-size:22pt;text-align:center;margin:0 0 18pt}h2{font-family:SimHei,"黑体",sans-serif;font-size:16pt;margin:18pt 0 9pt}h3{font-family:SimHei,"黑体",sans-serif;font-size:13pt;margin:12pt 0 6pt}p{margin:0 0 6pt;white-space:pre-wrap}.item{padding-left:2em;text-indent:-1em}</style></head><body>${body}</body></html>`
+}
+
+function locateSource(content: string, query: string): string {
+  const position = content.toLocaleLowerCase().indexOf(query.toLocaleLowerCase())
+  if (position < 0) return `未在已读取的原文中找到“${query}”。\n\n${content}`
+  return content.slice(Math.max(0, position - 800), Math.min(content.length, position + query.length + 1_800))
+}

@@ -9,6 +9,36 @@ export interface WorkbenchMaterial {
   addedAt: number
 }
 
+export interface MeetingInfo {
+  date: string
+  time: string
+  location: string
+  attendees: string
+  topic: string
+  recorder: string
+}
+
+export interface MeetingSourceLink {
+  nodeId: string
+  materialId: string
+  offset: number
+  length: number
+  status: 'verified' | 'needs_review'
+}
+
+export interface MeetingWorkspace {
+  folder: string
+  recordFile: string | null
+  minutesFile: string | null
+  activeDocument: 'record' | 'minutes'
+  phase: 'materials' | 'draft' | 'review' | 'minutes' | 'published'
+  info: MeetingInfo
+  sourceLinks: MeetingSourceLink[]
+  pendingSync: Array<'record' | 'minutes'>
+  referencePanelOpen: boolean
+  pdf: { path: string, revision: number } | null
+}
+
 export interface WorkbenchTask {
   phase: 'idle' | 'reading' | 'saving' | 'complete' | 'failed' | 'interrupted'
   label: string
@@ -40,6 +70,7 @@ export interface WorkbenchState {
   scene: WorkbenchScene
   targetFile: string | null
   materials: WorkbenchMaterial[]
+  meeting: MeetingWorkspace | null
   task: WorkbenchTask
   lastChange: WorkbenchChange | null
   document: {
@@ -47,6 +78,7 @@ export interface WorkbenchState {
     revision: number
     selectedNodeId: string | null
     selectedNodeTitle: string | null
+    selectedNodeContent: string | null
     dirty: boolean
     undoDepth: number
   } | null
@@ -67,6 +99,9 @@ export interface WorkbenchState {
 export type ClientMessage =
   | { type: 'hello' }
   | { type: 'set-context', requestId?: string, scene?: WorkbenchScene, targetFile?: string | null, addPath?: string, paste?: { label: string, content: string }, removeMaterialId?: string }
+  | { type: 'meeting-action', requestId?: string, action: 'open-meeting' | 'select-record' | 'select-minutes' | 'toggle-reference' | 'save-info' | 'import-docx' | 'export-pdf', folder?: string, info?: Partial<MeetingInfo>, docxPath?: string, overwrite?: boolean }
+  | { type: 'edit-node', requestId?: string, nodeId: string, title: string, content: string, expectedRevision: number }
+  | { type: 'read-source', requestId: string, materialId: string, query?: string }
   | { type: 'undo' }
   | { type: 'set-view', view: 'markdown' | 'mindmap' | 'table' }
 
@@ -74,3 +109,4 @@ export type HostMessage =
   | { type: 'state', state: WorkbenchState }
   | { type: 'error', message: string }
   | { type: 'operation-result', requestId: string, ok: boolean, message: string }
+  | { type: 'source-content', requestId: string, ok: boolean, label?: string, content?: string, message?: string }

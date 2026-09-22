@@ -23,10 +23,33 @@ function render(_args: unknown, value: unknown) {
 export interface ToolOptions {
   store: WorkbenchStore
   setContext(sessionId: string, patch: Parameters<WorkbenchStore['update']>[1]): Promise<Awaited<ReturnType<WorkbenchStore['update']>>>
+  openMeeting(sessionId: string, folder: string): Promise<unknown>
 }
 
 export function registerWorkbenchTools(ctx: { tools: { register(tool: unknown): () => void } }, options: ToolOptions): () => void {
   const tools = [
+    defineTool({
+      name: 'open_meeting_workbench', description: '打开一个会议文件夹，登记会议记录/纪要并把已有会议记录设为固定编辑目标。',
+      parameters: { folder: { type: 'string', required: true, description: '工作区内的会议文件夹。' } },
+      output: { schema: output({ context: { type: 'json' } }), render }, isConcurrencySafe: () => false,
+      async execute(args, exec) {
+        const id = sessionId(exec); if (id === null) return { success: false, message: '无法确定当前会话。' }
+        try { const context = await options.openMeeting(id, String(args.folder)); return { success: true, message: '会议工作台已打开。', context: JSON.parse(JSON.stringify(context)) } }
+        catch (error) { return { success: false, message: error instanceof Error ? error.message : String(error) } }
+      },
+    }),
+    defineTool({
+      name: 'update_meeting_info', description: '更新当前会议共享的时间、地点、参会人、主题或记录人；不会改写两份文档正文。',
+      parameters: { date: { type: 'string' }, time: { type: 'string' }, location: { type: 'string' }, attendees: { type: 'string' }, topic: { type: 'string' }, recorder: { type: 'string' } },
+      output: { schema: output({ context: { type: 'json' } }), render }, isConcurrencySafe: () => false,
+      async execute(args, exec) {
+        const id = sessionId(exec); if (id === null) return { success: false, message: '无法确定当前会话。' }
+        try {
+          const context = await options.store.updateMeeting(id, { info: Object.fromEntries(Object.entries(args).filter(([, value]) => typeof value === 'string')) })
+          return { success: true, message: '会议信息已保存。', context: JSON.parse(JSON.stringify(context)) }
+        } catch (error) { return { success: false, message: error instanceof Error ? error.message : String(error) } }
+      },
+    }),
     defineTool({
       name: 'get_workbench_context', description: '读取当前会议/项目工作台上下文。整理或修改前优先读取一次。', parameters: {}, isConcurrencySafe: () => true,
       output: { schema: output({ context: { type: 'json', description: '场景、目标、材料、文档状态与最近变更。' } }), render },
@@ -77,6 +100,24 @@ export function registerWorkbenchTools(ctx: { tools: { register(tool: unknown): 
           const maxChars = Math.min(20_000, Math.max(1, Number(args.max_chars) || 12_000))
           const result = await options.store.readMaterial(id, args.material_id, offset, maxChars)
           return { success: true, message: `已读取「${result.material.label}」字符 ${result.offset}-${result.nextOffset}${result.truncated ? '，仍有后续。' : '，已读完。'}`, material_id: result.material.id, label: result.material.label, content: result.content, offset: result.offset, next_offset: result.nextOffset, truncated: result.truncated }
+        } catch (error) { return { success: false, message: error instanceof Error ? error.message : String(error) } }
+      },
+    }),
+    defineTool({
+      name: 'search_meeting_source', description: '在当前会议参考材料中按关键词或时间戳查找原文，供核对事实使用；不会改变整理目标。',
+      parameters: { query: { type: 'string', required: true }, max_chars: { type: 'integer', description: '返回上限，默认 4000。' } },
+      output: { schema: output({ matches: { type: 'json' } }), render }, isConcurrencySafe: () => true,
+      async execute(args, exec) {
+        const id = sessionId(exec); if (id === null) return { success: false, message: '无法确定当前会话。' }
+        try {
+          const state = await options.store.get(id); const query = String(args.query).trim().toLocaleLowerCase(); const limit = Math.min(20_000, Math.max(1, Number(args.max_chars) || 4_000))
+          const matches: Array<{ material_id: string, label: string, content: string }> = []
+          for (const material of state.materials) {
+            const value = await options.store.readMaterial(id, material.id, 0, 20_000)
+            const index = value.content.toLocaleLowerCase().indexOf(query)
+            if (index >= 0) matches.push({ material_id: material.id, label: material.label, content: value.content.slice(Math.max(0, index - 500), index + query.length + limit) })
+          }
+          return { success: true, message: matches.length === 0 ? '未找到匹配原文。' : `找到 ${matches.length} 份匹配材料。`, matches }
         } catch (error) { return { success: false, message: error instanceof Error ? error.message : String(error) } }
       },
     }),

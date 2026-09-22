@@ -19,6 +19,7 @@ export interface StructuredDocumentServiceShape {
   }
   subscribe(sessionId: string, listener: (change: { kind: string, revision?: number, action?: string, elapsedMs?: number, summary?: { counts: { added: number, updated: number, deleted: number }, added_node_ids: string[], updated_node_ids: string[], deleted_node_ids: string[] } }) => void): () => void
   undo(sessionId: string): Promise<{ revision: number, saved: boolean, sidecarSaved: boolean, undoneAction: string }>
+  updateNode(sessionId: string, args: { nodeId: string, title: string, content: string, expectedFile: string, expectedRevision: number }): Promise<{ revision: number, saved: boolean, sidecarSaved: boolean }>
 }
 
 export interface SidebarControllerServiceShape {
@@ -40,7 +41,7 @@ export interface StructuredDocumentViewServiceShape {
   dispatch(sessionId: string, command: { name: 'set_view', view: 'markdown' | 'mindmap' | 'table' } | { name: 'focus_node', node: string, mode: 'visible' | 'center' } | { name: 'open_tab' }): Promise<unknown>
 }
 
-interface DocNodeShape { id: string, title: string, children: DocNodeShape[] }
+interface DocNodeShape { id: string, title: string, content: string, children: DocNodeShape[] }
 
 export interface WorkbenchContextShape {
   tools: { register(tool: ToolDefinition): () => void }

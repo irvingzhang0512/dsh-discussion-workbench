@@ -130,22 +130,41 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
   }
   const sceneLabel = state?.scene === 'project' ? '项目更新' : '会议整理'
   const selected = state?.document?.selectedNodeTitle || '无'
+  const targetName = shortName(state?.targetFile) || '未设置'
+  const panelId = `dwb-panel-${id}`
   const status = state?.task.phase === 'idle' ? '' : state?.task.label
   return (
     <div className="dwb-shell">
-      <button className="dwb-summary" type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded}>
-        <span className={`dwb-dot ${connected ? 'is-online' : ''}`} />
-        <span>场景：{sceneLabel}</span><span className="dwb-sep">｜</span>
-        <span>参考材料：{state?.materials.length ?? 0}</span><span className="dwb-sep">｜</span>
-        <span className="dwb-ellipsis">整理目标：{shortName(state?.targetFile) || '未设置'}</span><span className="dwb-sep">｜</span>
-        <span className="dwb-ellipsis">当前节点：{selected}</span>
-        <span className="dwb-caret">{expanded ? '收起' : '展开'}</span>
+      <button className="dwb-summary" type="button" onClick={() => setExpanded(value => !value)} aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}>
+        <span className="dwb-scene" title={`场景：${sceneLabel} · ${connected ? '工作台已连接' : '工作台未连接'}`}>
+          <span className={`dwb-dot ${connected ? 'is-online' : ''}`} aria-hidden="true" />
+          <span className="dwb-scene-label">场景</span>
+          <span className="dwb-scene-name">{sceneLabel}</span>
+        </span>
+        <span className="dwb-summary-details">
+          <span className="dwb-summary-item dwb-summary-materials">
+            <span className="dwb-summary-label">参考材料</span>
+            <span className="dwb-count">{state?.materials.length ?? 0}</span>
+          </span>
+          <span className="dwb-summary-item" title={state?.targetFile ?? '尚未设置整理目标'}>
+            <span className="dwb-summary-label">整理目标</span>
+            <span className={`dwb-summary-value ${state?.targetFile ? '' : 'is-empty'}`}>{targetName}</span>
+          </span>
+          <span className="dwb-summary-item" title={state?.document?.selectedNodeTitle || '尚未选择节点'}>
+            <span className="dwb-summary-label">当前节点</span>
+            <span className={`dwb-summary-value ${state?.document?.selectedNodeTitle ? '' : 'is-empty'}`}>{selected}</span>
+          </span>
+        </span>
+        <span className="dwb-caret">
+          <span>{expanded ? '收起' : '展开'}</span>
+          <svg className="dwb-chevron" viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </span>
       </button>
       {status && <div className={`dwb-task is-${state?.task.phase}`}>{status}</div>}
       {error && <div className="dwb-error">{error}</div>}
       {pending && <div className="dwb-task is-saving">{pending.label}</div>}
       {notice && <div className="dwb-notice">{notice}</div>}
-      {expanded && <div className="dwb-panel">
+      {expanded && <div className="dwb-panel" id={panelId}>
         <div className="dwb-meeting">
           <label>会议文件夹</label><input value={meetingFolder} onChange={event => setMeetingFolder(event.target.value)} placeholder="工作区内的会议文件夹" />
           <button type="button" disabled={!connected || pending !== null} onClick={() => submitMeeting(send, 'open-meeting', { folder: meetingFolder }, '正在打开会议…')}>打开会议</button>
@@ -264,11 +283,24 @@ function changeText(change: NonNullable<WorkbenchState['lastChange']>): string {
 function injectStyle(): void {
   if (document.getElementById('dwb-style')) return
   const style = document.createElement('style'); style.id = 'dwb-style'; style.textContent = `
-.dwb-shell{font-size:12px;border:1px solid rgba(128,128,128,.24);border-radius:10px;background:var(--background,#fff);color:inherit;overflow:hidden;margin-bottom:6px}
-.dwb-summary{display:flex;width:100%;gap:4px;align-items:center;border:0;background:transparent;color:inherit;padding:7px 10px;text-align:left;cursor:pointer}.dwb-dot{width:7px;height:7px;border-radius:50%;background:#aaa;flex:none}.dwb-dot.is-online{background:#35a45b}.dwb-sep,.dwb-meta{opacity:.5}.dwb-ellipsis{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dwb-caret{margin-left:auto;opacity:.55}.dwb-panel{display:grid;gap:7px;padding:9px 10px;border-top:1px solid rgba(128,128,128,.2)}.dwb-row{display:flex;gap:6px;align-items:center}.dwb-row label{width:58px;opacity:.7}.dwb-row input{min-width:100px;flex:1}.dwb-row input,.dwb-row select,.dwb-paste input,.dwb-paste textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-row button,.dwb-paste button,.dwb-change button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-row button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-spacer{flex:1}.dwb-paste{display:grid;grid-template-columns:150px 1fr auto;gap:6px}.dwb-paste textarea{min-height:54px;resize:vertical}.dwb-materials{display:flex;gap:5px;flex-wrap:wrap}.dwb-chip{background:rgba(79,110,247,.1);padding:3px 7px;border-radius:10px}.dwb-chip button{border:0;background:transparent;color:inherit;cursor:pointer;margin-left:4px}.dwb-task{padding:5px 10px;background:rgba(79,110,247,.09);border-top:1px solid rgba(128,128,128,.14)}.dwb-task.is-failed,.dwb-error{padding:5px 10px;background:rgba(220,50,50,.1);color:#b52828}.dwb-change{display:grid;grid-template-columns:1fr auto;gap:3px 8px;padding:7px;border:1px solid rgba(53,164,91,.25);border-radius:7px;background:rgba(53,164,91,.06)}.dwb-change div:nth-child(2){grid-column:1}.dwb-change button{grid-column:2;grid-row:1/3}.dwb-metrics,.dwb-hints{opacity:.65;border-top:1px solid rgba(128,128,128,.15);padding-top:6px}
+.dwb-shell{--dwb-text:var(--dsw-alias-label-primary,#242933);--dwb-muted:var(--dsw-alias-label-secondary,#697180);--dwb-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-accent:var(--dsw-alias-brand-primary,#4f6ef7);--dwb-border:var(--dsw-alias-border-l2,#e9ebef);box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance,16px));max-width:var(--dsh-composer-card-max-width,720px);min-width:0;margin:0 auto;font-size:12px;line-height:1.5;font-family:inherit;border:1px solid var(--dwb-border);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);overflow:hidden;container-type:inline-size;container-name:dwb}
+.dwb-shell *{box-sizing:border-box}
+.dwb-summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;width:100%;gap:14px;align-items:center;border:0;border-radius:11px;background:transparent;color:inherit;font:inherit;padding:9px 12px;text-align:left;cursor:pointer;transition:background-color .15s}
+.dwb-summary:hover,.dwb-summary[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.06))}
+.dwb-summary:focus-visible{outline:2px solid var(--dwb-accent);outline-offset:-2px}
+.dwb-scene{display:inline-flex;gap:6px;align-items:center;min-width:0;padding:3px 8px;border-radius:7px;background:color-mix(in srgb,var(--dwb-accent) 9%,transparent);white-space:nowrap}
+.dwb-scene-label{font-size:11px;color:var(--dwb-muted)}.dwb-scene-name{font-weight:600;color:var(--dwb-accent)}
+.dwb-dot{width:6px;height:6px;border-radius:50%;background:var(--dwb-faint);flex:none}.dwb-dot.is-online{background:var(--dsw-alias-state-success-primary,#35a45b)}
+.dwb-summary-details{display:flex;gap:12px;align-items:center;min-width:0}.dwb-summary-item{display:flex;gap:6px;align-items:center;min-width:0;flex:1}.dwb-summary-materials{flex:none}.dwb-summary-label{color:var(--dwb-muted);white-space:nowrap;flex:none}.dwb-summary-value{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}.dwb-summary-value.is-empty{color:var(--dwb-faint);font-weight:400}.dwb-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;padding:0 5px;border-radius:5px;background:var(--dsw-alias-bg-layer-2,#f2f4f7);color:var(--dwb-muted);font-size:11px;font-variant-numeric:tabular-nums;line-height:20px}
+.dwb-caret{display:flex;gap:4px;align-items:center;color:var(--dwb-muted);white-space:nowrap;font-size:11px}.dwb-chevron{flex:none;transition:transform .15s}.dwb-summary[aria-expanded="true"] .dwb-chevron{transform:rotate(180deg)}
+@container dwb (max-width:580px){.dwb-summary{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px}.dwb-scene{justify-self:start}.dwb-caret{grid-column:2;grid-row:1}.dwb-summary-details{grid-column:1/-1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.dwb-summary-item{gap:5px}.dwb-summary-item+.dwb-summary-item{border-left:1px solid var(--dwb-border);padding-left:12px}}
+@container dwb (max-width:420px){.dwb-summary-item{align-items:flex-start;flex-direction:column;gap:2px}.dwb-summary-label{font-size:11px}.dwb-summary-value{max-width:100%}.dwb-count{line-height:18px}}
+@media(prefers-reduced-motion:reduce){.dwb-summary,.dwb-chevron{transition:none}}
+.dwb-meta{opacity:.5}.dwb-panel{display:grid;gap:7px;padding:9px 12px;border-top:1px solid var(--dwb-border)}.dwb-row{display:flex;gap:6px;align-items:center}.dwb-row label{width:58px;opacity:.7}.dwb-row input{min-width:100px;flex:1}.dwb-row input,.dwb-row select,.dwb-paste input,.dwb-paste textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-row button,.dwb-paste button,.dwb-change button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-row button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-spacer{flex:1}.dwb-paste{display:grid;grid-template-columns:150px 1fr auto;gap:6px}.dwb-paste textarea{min-height:54px;resize:vertical}.dwb-materials{display:flex;gap:5px;flex-wrap:wrap}.dwb-chip{background:rgba(79,110,247,.1);padding:3px 7px;border-radius:10px}.dwb-chip button{border:0;background:transparent;color:inherit;cursor:pointer;margin-left:4px}.dwb-task{padding:5px 10px;background:rgba(79,110,247,.09);border-top:1px solid rgba(128,128,128,.14)}.dwb-task.is-failed,.dwb-error{padding:5px 10px;background:rgba(220,50,50,.1);color:#b52828}.dwb-change{display:grid;grid-template-columns:1fr auto;gap:3px 8px;padding:7px;border:1px solid rgba(53,164,91,.25);border-radius:7px;background:rgba(53,164,91,.06)}.dwb-change div:nth-child(2){grid-column:1}.dwb-change button{grid-column:2;grid-row:1/3}.dwb-metrics,.dwb-hints{opacity:.65;border-top:1px solid rgba(128,128,128,.15);padding-top:6px}
 .dwb-file-candidate{display:flex;align-items:center;gap:6px;min-width:0;flex:1}.dwb-file-candidate .dwb-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.8}.dwb-file-candidate button{white-space:nowrap;border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-file-reason{font-size:11px;opacity:.62;white-space:nowrap}.dwb-row button:disabled,.dwb-file-candidate button:disabled{cursor:not-allowed;opacity:.45}.dwb-notice{padding:5px 10px;background:rgba(53,164,91,.08);color:#287a43}@media(max-width:680px){.dwb-file-candidate{flex-wrap:wrap}.dwb-file-candidate .dwb-meta{flex-basis:100%}}
 .dwb-meeting,.dwb-meeting-info{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;border:1px solid rgba(79,110,247,.24);border-radius:7px}.dwb-meeting input{flex:1;min-width:180px}.dwb-meeting-info input{min-width:100px;flex:1}.dwb-meeting button,.dwb-meeting-info button,.dwb-source button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-meeting button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-source{border:1px solid rgba(128,128,128,.25);border-radius:7px;padding:7px}.dwb-source>div{display:flex;gap:6px;align-items:center}.dwb-source input{flex:1;min-width:120px}.dwb-source pre{max-height:260px;overflow:auto;white-space:pre-wrap;line-height:1.45;margin:7px 0 0;background:rgba(128,128,128,.06);padding:7px}
 .dwb-node-editor{display:grid;grid-template-columns:1fr auto auto;gap:6px;border:1px solid rgba(53,164,91,.26);border-radius:7px;padding:7px}.dwb-node-editor input,.dwb-node-editor textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-node-editor textarea{grid-column:1/-1;min-height:88px;resize:vertical}.dwb-node-editor button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
+@container dwb (max-width:580px){.dwb-row{flex-wrap:wrap}.dwb-row label{flex:none}.dwb-row .dwb-spacer{display:none}.dwb-file-candidate{flex-basis:calc(100% - 70px);flex-wrap:wrap}.dwb-file-candidate .dwb-meta{flex-basis:100%}.dwb-file-reason{white-space:normal}.dwb-paste{grid-template-columns:minmax(0,1fr)}.dwb-paste input,.dwb-paste textarea{min-width:0;width:100%}.dwb-source>div{flex-wrap:wrap}.dwb-node-editor{grid-template-columns:minmax(0,1fr) auto}.dwb-node-editor input{grid-column:1/-1;min-width:0}}
 `
   document.head.appendChild(style)
 }

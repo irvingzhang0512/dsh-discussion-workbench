@@ -1,6 +1,6 @@
 {
   "name": "dsh-discussion-workbench",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH 讨论工作台：统一会议与项目材料、固定整理目标、动态模型上下文和文档变更反馈。",
   "type": "module",
   "main": "./lib/index.js",

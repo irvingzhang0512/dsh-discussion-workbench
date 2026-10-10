@@ -37,8 +37,9 @@ Cordis 在上述三个协作服务就绪后挂载工作台，避免依赖插件�
 
 ### 设置层
 
-- 宿主在 `settings` 服务存在时注册 namespace `dsh-discussion-workbench`（合法的小写连字符标识），schema 只声明 `dock`（三值枚举，默认 `auto`），以组装层配置为 `base`，声明 `applies: 'live'`。`SettingsProvider.register(ns, schema, { base, applies, validate? })` 与 `installSection(owner, ns, schema, entry, hooks)` 表达同一层语义：后者把组装层 `entry` 同时作为 base 与设置服务卸载后的回退，`hooks` 为 `{ setSource(current), onChange(), validate? }`。
-- 注册是插件 fiber 上的 effect：插件卸载即移除 namespace 及其观察者；同名 namespace 重复注册会失败。
+- 宿主在 `settings` 服务存在时注册 namespace `dsh-discussion-workbench`（合法的小写连字符标识，常量集中在 [../src/shared/settings.ts](../src/shared/settings.ts)，宿主与客户端共用），schema 只声明 `dock`（三值枚举，默认 `auto`），以组装层配置为 `base`，声明 `applies: 'live'`。注册位置：[../src/index.ts](../src/index.ts) 内 `ctx.inject(['settings'], …)`；settings 服务面（`register`／`get`／`watch`）的类型见 [../src/context-types.ts](../src/context-types.ts)，只声明本插件用到的部分。`SettingsProvider.register(ns, schema, { base, applies, validate? })` 与 `installSection(owner, ns, schema, entry, hooks)` 表达同一层语义：后者把组装层 `entry` 同时作为 base 与设置服务卸载后的回退，`hooks` 为 `{ setSource(current), onChange(), validate? }`；本插件用 `register`。
+- `base` 取**归一化后的**组装层配置：只把合法的显式取值写进 `base`（如 `{ dock: 'off' }`），组装层未配置或取值非法时 `base` 为空分节、由 schema 默认值补齐 `auto`。归一化是必需的——注册时 `base` 会先过 schema，直接透传非法值会让注册失败、中断插件挂载。
+- 注册是插件 fiber 上的 effect：插件卸载即移除 namespace 及其观察者；同名 namespace 重复注册会失败。卸载时判定回退到组装层配置，并对已连接会话重推一次状态。
 - 写入落在设置文档（`<DSH_HOME>/settings.yaml`）的用户层；某字段出现在 `user` 层即视为用户覆盖（即使取值等于组装层默认值），清除该字段则回退组装层。写入按 namespace revision 设栅，过期写入被拒绝而不是覆盖并发修改。
 - `applies: 'live'`：保存后立即生效（宿主每次判定读取当前解析值，不缓存挂载时的快照），**不需要重载插件**——这是与组装层的关键差异。为使已打开的页面无需刷新即可反映，宿主在变更通知里按现有快照通道对已知会话重算并推送一次状态。
 - 设置服务是软依赖：缺失时不注册 namespace，`dock` 只用组装层配置，插件照常挂载。
@@ -47,16 +48,17 @@ Cordis 在上述三个协作服务就绪后挂载工作台，避免依赖插件�
 
 会话是否「已使用」由宿主判定，并只在状态快照里下发一个布尔值；客户端按该布尔值渲染，不做第二次判断，因此不存在两侧判定不一致。是否注入模型上下文不跟随 `dock`，只跟随会话是否已使用：`off` 下已使用的会话仍把目标、版本与材料索引交给模型，`always` 下未使用的会话不产生空上下文块。
 
-实现位置：取值解析、使用痕迹判定和会话内记忆集中在 `src/host/dock.ts`；`src/index.ts` 负责逐字段兜底、解析两层配置（用户层优先，缺层时回退）、把判定写进快照（`WorkbenchState.dock`）、按使用痕迹决定是否注入上下文，并在 WebSocket 断开时释放会话内记忆，使重开会话按当时痕迹重新判定。`src/client/index.tsx` 只在快照判定为真时渲染摘要栏；未判定为真时仍保持连接以接收后续激活变化。`dock` 字段只随快照下发，不写入 `.dsh-workbench/sessions/` 的持久状态。
+实现位置：取值解析、使用痕迹判定和会话内记忆集中在 `src/host/dock.ts`；`src/index.ts` 负责逐字段兜底、解析两层配置（用户层优先，缺层时回退）、把判定写进快照（`WorkbenchState.dock`）、按使用痕迹决定是否注入上下文，并在 WebSocket 断开时释放会话内记忆，使重开会话按当时痕迹重新判定。设置层接入后，判定不再读挂载时捕获的常量：`readDockMode()` 每次判定都取当前解析值（设置路径直接 `scope.get()`），设置变更时由 `scope.watch` 触发 `republish()`，对已连接会话按现有快照通道重推一次；`release()` 只在连接断开时调用，配置变化不清除会话内显示记忆。`src/client/index.tsx` 只在快照判定为真时渲染摘要栏；未判定为真时仍保持连接以接收后续激活变化。`dock` 字段只随快照下发，不写入 `.dsh-workbench/sessions/` 的持久状态。
 
 ### 设置页卡片（客户端）
 
 - 卡片注册在 keyed slot `settings.plugin.item` 上，key 为 namespace 本身，形状为 `{ name: 'settings.plugin.item', key: 'dsh-discussion-workbench', locale?, inject? }` 加卡片组件。该 slot 是 `keyed` 类型、作用域 root，`key` 必填、键域开放（由派发方决定具体键）；key 固定为 namespace 本身以保持唯一（同 key 重复注册的具体行为以实现为准，本版不依赖它）。「插件配置」标签页按 Host 服务的 namespace 派发该键（派发键即 `entryKey`），被服务却没有卡片认领的 namespace 什么都不渲染，因此卡片是该配置入口的必要条件。
 - 官方给出的注册示例本身就是自绘元素：`ctx.slots.register({ name: 'settings.plugin.item', key: '<key>' }, () => React.createElement('div', null, 'hello'))`，即仓库外插件自绘卡片是被支持的形态；当前该 slot 的占用者只有官方包自带的四张卡片（bash／agent-loop／subagent-model-selection／web-search-deepseek），`dsh-discussion-workbench` 这个 key 尚未被占用。
-- 读写在客户端经 `ctx.settingsScope.bind({ namespace: 'dsh-discussion-workbench' })`：快照为 `{ status: 'loading' | 'ready' | 'unavailable', value, base, user, revision, writable, mode }`，写用 `set(field, value)`／`unset(field)`（带 revision 栅栏）。与宿主一致，客户端把「字段是否出现在 `user`」作为覆盖判定，而不是比较取值。
+- 读写在客户端经 `ctx.settingsScope.bind({ namespace: 'dsh-discussion-workbench' })`：快照为 `{ status: 'loading' | 'ready' | 'unavailable', value, base, user, revision, writable, mode }`，写经 scope 的 `mutate(operations, expectedRevision)`（带 revision 栅栏）。与宿主一致，客户端把「字段是否出现在 `user`」作为覆盖判定，而不是比较取值。实现位置：[../src/client/index.tsx](../src/client/index.tsx) 的 `DockSettingsCard`，软挂在 `ctx.inject(['settingsScope'], …)` 内。
+- 写入必须走 `mutate`：`set(field, value)`／`unset(field)` 只是它的单操作形式，**不接受** `expectedRevision`；需要 revision 栅栏时调用 `mutate([{ op: 'set', path: ['dock'], value }])` 或 `mutate([{ op: 'unset', path: ['dock'] }], revision)`。卡片在开始草拟时记录快照 revision 作为固定栅栏，过期保存被拒绝而不是覆盖并发修改。
 - 卡片字段：`dock` 一个三选一控件（`always` / `auto` / `off`，默认 `auto`）；编辑先暂存草稿，保存时才按序写入，并标明该字段是否被用户覆盖、清除后回退到组装层。namespace 对本客户端不可用（`unavailable`）时不渲染卡片，而不是渲染一张无法操作的卡。
 - 卡片自绘内部：官方卡片外壳（`PluginCard` 及其 `CardShell`／`CardFieldSpec` 表单模型）与卡片文案键属于 `@deepseek-ai/dsh-client-ui-settings-plugins` 的包内 locale 字典（`PluginsSettingsLocaleKey`），客户端纯度门禁禁止跨插件值导入，因此本插件的卡片自绘标题、说明与控件样式，只经 cordis 服务（`slots`、`settingsScope`）与宿主协作。
-- 客户端 `settingsScope` 是软依赖：缺失时只影响卡片，摘要栏与工作台其他功能照常。
+- 客户端 `settingsScope` 是软依赖：缺失时只影响卡片，摘要栏与工作台其他功能照常。入口 `exports.inject` 只声明 `slots`，设置卡在 `apply` 内用 `ctx.inject(['settingsScope'], …)` 挂载；卡片自绘样式复用摘要栏的 `--dwb-*` 变量（该组变量同时声明在 `.dwb-shell` 与 `.dwb-settings` 上，设置页不在摘要栏容器内）。
 
 ## 输入框上方的工作台摘要
 

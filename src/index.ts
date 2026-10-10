@@ -13,6 +13,7 @@ import { WorkbenchBridge } from './host/bridge.ts'
 import { registerWorkbenchTools } from './host/tools.ts'
 import { trustedRequest } from './host/trust-fence.ts'
 import { DockVisibility, isWorkbenchUsed, resolveDockMode, type DockMode } from './host/dock.ts'
+import { SETTINGS_NAMESPACE } from './shared/settings.ts'
 
 export const name = 'dsh-discussion-workbench'
 export const inject = ['tools', 'skills', 'sessions', 'webServer', 'webRuntime', 'systemPrompt', 'structuredDocument', 'sidebarController', 'structuredDocumentView']
@@ -25,15 +26,46 @@ export const BRIDGE_PATH = '/discussion-workbench/ws'
 const execFileAsync = promisify(execFile)
 
 export function apply(ctx: Context, baseConfig?: PluginConfig): void {
-  const resolvedDock = resolveDockMode(baseConfig?.dock)
-  const dockMode = resolvedDock.mode
-  if (resolvedDock.invalid) {
-    ctx.logger?.warn?.(`[discussion-workbench] 无法识别的 dock 配置取值 ${JSON.stringify(baseConfig?.dock)}，按 auto 处理。`)
+  // 组装层（profile patch 的 config）是设置层的 base 层：逐字段兜底并归一化非法取值（F009）。
+  // 非法／缺失取值不写入 base，交由 schema 默认值补齐——否则注册时会先被 schema 拒绝而中断挂载。
+  const rawDock: unknown = baseConfig?.dock
+  const assemblyDock = resolveDockMode(rawDock)
+  if (assemblyDock.invalid) {
+    ctx.logger?.warn?.(`[discussion-workbench] 无法识别的 dock 配置取值 ${JSON.stringify(rawDock)}，按 auto 处理。`)
   }
+  const assemblyProvided = rawDock !== undefined && rawDock !== null && rawDock !== ''
+  const baseSection: PluginConfig = assemblyProvided && !assemblyDock.invalid ? { dock: assemblyDock.mode } : {}
   const dockVisibility = new DockVisibility()
   const bridge = new WorkbenchBridge()
+  // 判定每次都读取当前解析值（设置层保存即时生效），不缓存挂载时的快照（F010）。
+  let readDockMode = (): DockMode => assemblyDock.mode
+  const publishState = (sessionId: string, state: WorkbenchState): void => {
+    bridge.state(sessionId, { ...state, dock: dockVisibility.visible(readDockMode(), sessionId, isWorkbenchUsed(state)) })
+  }
   const cwd = (sessionId: string): string => ctx.sessions.get(sessionId)?.header?.cwd || process.cwd()
-  const store = new WorkbenchStore({ cwd, onChange: (sessionId, state) => bridge.state(sessionId, { ...state, dock: dockVisibility.visible(dockMode, sessionId, isWorkbenchUsed(state)) }) })
+  const store = new WorkbenchStore({ cwd, onChange: (sessionId, state) => publishState(sessionId, state) })
+
+  // 已连上页面的会话：配置变化后按现有快照通道重算并推送一次，已打开的页面无需刷新（F010）。
+  const connectedSessions = new Set<string>()
+  const republish = (): void => {
+    for (const sessionId of connectedSessions) {
+      const state = store.peek(sessionId)
+      if (state !== undefined) publishState(sessionId, structuredClone(state))
+    }
+  }
+
+  // settings 是软依赖：不写进入口 inject，缺失时不注册 namespace，dock 只用组装层配置（F010）。
+  ctx.inject(['settings'], sctx => {
+    const scope = sctx.settings?.register?.(SETTINGS_NAMESPACE, Config, { base: baseSection, applies: 'live' })
+    if (scope === undefined) return
+    readDockMode = () => resolveDockMode((scope.get() as PluginConfig | undefined)?.dock).mode
+    const stopWatching = scope.watch(() => republish())
+    sctx.effect(() => () => {
+      stopWatching()
+      readDockMode = () => assemblyDock.mode
+      republish()
+    }, 'dsh-discussion-workbench: settings cleanup')
+  })
   const documentService = ctx.get('structuredDocument') as StructuredDocumentServiceShape | undefined
   const sidebarService = ctx.get('sidebarController') as SidebarControllerServiceShape | undefined
   const viewService = ctx.get('structuredDocumentView') as StructuredDocumentViewServiceShape | undefined
@@ -275,6 +307,7 @@ export function apply(ctx: Context, baseConfig?: PluginConfig): void {
   } })
 
   function attach(ws: WebSocket, sessionId: string): void {
+    connectedSessions.add(sessionId)
     const detach = bridge.attach(sessionId, ws)
     void store.mutateRuntime(sessionId, state => { state.connected = true }).then(() => queueReconcile(sessionId)).catch(error => bridge.error(sessionId, String(error)))
     ws.on('message', data => {
@@ -368,7 +401,7 @@ export function apply(ctx: Context, baseConfig?: PluginConfig): void {
         })
       }
     })
-    ws.on('close', () => { detach(); dockVisibility.release(sessionId); void store.mutateRuntime(sessionId, state => { state.connected = false }) })
+    ws.on('close', () => { detach(); connectedSessions.delete(sessionId); dockVisibility.release(sessionId); void store.mutateRuntime(sessionId, state => { state.connected = false }) })
     ws.on('error', () => detach())
   }
 
@@ -378,7 +411,7 @@ export function apply(ctx: Context, baseConfig?: PluginConfig): void {
     for (const unsubscribe of subscriptions.values()) unsubscribe()
     for (const unsubscribe of sidebarSubscriptions.values()) unsubscribe()
     for (const unsubscribe of viewSubscriptions.values()) unsubscribe()
-    subscriptions.clear(); sidebarSubscriptions.clear(); viewSubscriptions.clear(); pendingViewRefresh.clear(); turnTimings.clear(); documentCalls.clear(); contextQueues.clear(); contextTransitions.clear(); contextRequestResults.clear(); contextRequestTasks.clear(); bridge.close(); wss.close()
+    subscriptions.clear(); sidebarSubscriptions.clear(); viewSubscriptions.clear(); pendingViewRefresh.clear(); turnTimings.clear(); documentCalls.clear(); contextQueues.clear(); contextTransitions.clear(); contextRequestResults.clear(); contextRequestTasks.clear(); connectedSessions.clear(); bridge.close(); wss.close()
   }, 'dsh-discussion-workbench: teardown')
 }
 

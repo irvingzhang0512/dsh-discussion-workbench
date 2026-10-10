@@ -95,12 +95,13 @@
 
 ## F010 设置页插件配置卡片
 
-- 实现状态：待实现（2026-10-10 规格增量，用户确认该版文档后开发）。
+- 实现状态：已实现（2026-10-10，用户确认该版规格后开发；包版本 0.3.0）。
 - 场景与预期：为 `dock` 增加设置页入口，不再只依赖组装层配置。宿主在设置服务存在时把 namespace `dsh-discussion-workbench` 注册为可编辑分节，schema 只声明 `dock`（枚举 `always` / `auto` / `off`，默认 `auto`），组装层配置作为 `base` 层，效果时机声明为 `applies: 'live'`。设置页「插件 → 插件配置」按 namespace 配对本插件注册的卡片（`settings.plugin.item`，key 为同一 namespace），卡片显示当前生效值以及该字段是否被用户覆盖；保存写入设置文档的用户层，清除该字段则回退组装层。解析顺序固定为：用户层 > 组装层 `base` > schema 默认值。
 - 边界与异常：F009 的显示语义不变——`auto` 仍只在该会话已使用工作台（有固定整理目标、参考材料或已打开会议）时显示摘要栏，模型上下文注入仍只跟随使用痕迹而不跟随 `dock`，会话内显示记忆（本次连接内显示过就保持）也不因配置变化被清除；本版变化的只是配置来源与生效方式。设置层保存即时生效、不需要重载插件；组装层 `cordis.patch.yml` 的 `config` 改动仍需要重载插件后才生效，实现与卡片文案都要写清这个差异。设置服务是软依赖：缺失时不注册 namespace，`dock` 只用组装层配置（等同现状），插件照常挂载并保留六个工具与技能，卡片不出现；客户端 `settingsScope` 同为软依赖，缺失时只影响卡片，不阻塞摘要栏与工作台其他功能。非法取值按 `auto` 处理并记警告：设置层写入前由 schema 拒绝非法值，因此非法值不会落盘；组装层读取时仍要归一化并告警。namespace 未对本客户端服务时卡片渲染为空。
 - 验收条件：`settings.describe()` 能看到 namespace `dsh-discussion-workbench`，`applies` 为 `live`，`base` 等于组装层配置，schema 只声明 `dock`（三值枚举、默认 `auto`）；设置页出现该卡片，把 `dock` 改成 `off` 保存后新建会话不显示摘要栏，且不需要重载插件；清除该字段后回到组装层值，组装层未配置时为 `auto`；设置服务缺失时插件仍挂载、`dock` 取组装层配置、卡片不出现，摘要栏与六个工具行为不变；设置层写入非法值被拒绝且不落盘，组装层出现非法值时按 `auto` 并记警告；F009 的判定不变（`auto` 未使用不显示、已使用显示，注入只跟随使用痕迹）。
-- 实现依据：待实现；预期改动 [../src/index.ts](../src/index.ts)（注册 namespace、`base` 取组装层配置、`applies: 'live'`、判定改为每次读取当前解析值）、[../src/client/index.tsx](../src/client/index.tsx)（注册 `settings.plugin.item` 卡片并绑定 `settingsScope`）、[../cordis.patch.yml](../cordis.patch.yml)（组装层 `config` 仍是 base 来源；该文件的 `inject` 必须与 [../src/index.ts](../src/index.ts) 对齐，而设置服务不列为必需依赖，否则设置服务缺失时会推迟整个插件挂载）。F009 的取值解析、使用痕迹判定与会话内记忆仍集中在 [../src/host/dock.ts](../src/host/dock.ts)，语义不变。
-- 验证记录：本版为文档增量，未运行任何验证。
+- 实现依据：已实现。[../src/index.ts](../src/index.ts)（`ctx.inject(['settings'], …)` 把 settings 作软依赖注册 namespace：`base` 取归一化后的组装层配置、`applies: 'live'`；`readDockMode()` 每次判定都读取当前解析值，不缓存挂载时快照；设置变更后按现有快照通道对已连接会话重算并重推一次状态）、[../src/shared/settings.ts](../src/shared/settings.ts)（namespace 常量，宿主与客户端共用）、[../src/context-types.ts](../src/context-types.ts)（settings 服务面）、[../src/client/index.tsx](../src/client/index.tsx)（`ctx.inject(['settingsScope'], …)` 挂载 `settings.plugin.item` 卡片，key 为 namespace）、[../cordis.patch.yml](../cordis.patch.yml)（组装层 `config` 仍是 base 来源；该文件 `inject` 与 src/index.ts 对齐且不含 settings，否则设置服务缺失会推迟整个插件挂载）。F009 的取值解析、使用痕迹判定与会话内记忆仍集中在 [../src/host/dock.ts](../src/host/dock.ts)，语义不变。
+- 实现细节（与上文措辞的一处偏差，已按真实 API 修正契约）：绑定后的 scope 上 `set(field, value)`／`unset(field)` 是 `mutate` 的单操作形式，**不接受** `expectedRevision`；需要 revision 栅栏必须直接调用 `mutate([{ op: 'set' | 'unset', path: ['dock'] }], revision)`。卡片因此走 `mutate` 完成带栅栏的保存与清除，写入语义（写用户层、清除后回退组装层）与规格一致。[architecture.md](architecture.md) 的「设置页卡片」已同步为这条真实接线。
+- 验证记录：2026-10-10 `npm run typecheck` 通过；`npm test` 通过（5 个文件 39 项，F009 的 26 项保持通过，新增 13 项：`tests/host-context.spec.ts` 加 1 项、新增 `tests/settings.spec.ts` 7 项、新增 `tests/client-bundle.spec.ts` 5 项）；`npm run build` 通过并生成 `lib/client.js`（46.96 kB）。新增覆盖：namespace 注册形状（`base` 取组装层配置、`applies: 'live'`、schema 只声明 `dock` 且默认 `auto`、非法 base 被 schema 拒绝）、组装层缺省时 `base` 为空分节、组装层非法取值仍挂载并告警且不把非法值写进 `base`、settings 缺失时仍挂载并只用组装层配置；设置层写入 `off` 后已使用会话快照 `dock` 变为 `false`（真实 WebSocket 桥接收宿主重推的状态）、清除覆盖后回退组装层、F009 的使用痕迹／会话内记忆／上下文注入不因配置变化被清除；客户端 bundle 冒烟（loader id、`exports.inject` 只含 `slots`、两个 slot 与卡片 key、无会话不抛错、`unavailable` 渲染为空、settingsScope 缺失只少卡片、保存按 revision 栅栏调 `mutate`）。另用两处临时实现变异（挂载时冻结取值、去掉设置变更重推）确认上述 live 生效用例会失败，用例非空断言，变异已回滚。未执行：真实宿主与页面验收——需要重载插件后才生效，本次未重启承载当前会话的环境（3080 日常实例即该进程），因此运行中的宿主仍是旧代码，设置页卡片的实际渲染、保存后的页面即时变化与 revision 冲突拒绝仍需重载后核对。
 
 ## 差异与验证待办
 
@@ -108,7 +109,8 @@
 - 当前仅 tests/store.spec.ts 有 5 个存储用例；目标绑定、上下文注入、转换／导出、宿主工具与 GUI 无同等自动覆盖。acceptance.md 旧结果只保留为历史证据，不据此宣称本次通过。
 - 本仓库没有独立冻结的原始需求文件，不补写伪造历史；会议指南继续作为使用与设计来源维护。
 - 2026-10-10 增量待办：F009 已实现并通过 typecheck／26 项测试／构建；真实宿主只跑了冒烟脚本的负向对照（运行中的宿主仍是旧代码），重载后的正向断言与浏览器页面验证未执行。
-- 2026-10-10 F010 待办：设置页插件配置卡片尚未实现，只有本版规格。配置改动需核对的遗留项：现网 profile 的 `cordis.patch.yml` 未覆盖本插件（插件自身为 `config: {}`，无取值），设置的 `settings.yaml` 里也还没有 `dsh-discussion-workbench` 分节，因此既没有失效字段需要清理，也没有旧用户层取值需要迁移；新增 `dock` 未配置时按 `auto`。技能目录条目（名称／描述／whenToUse）仍随每次会话出现，它是模型发现工作台的入口，本版不提供独立开关。
+- 2026-10-10 F010 待办（已实现，剩余未执行项）：设置页卡片已实现并通过 typecheck／39 项测试／构建。配置改动需核对的遗留项：现网 profile 的 `cordis.patch.yml` 未覆盖本插件（插件自身为 `config: {}`，无取值），设置的 `settings.yaml` 里也还没有 `dsh-discussion-workbench` 分节，因此既没有失效字段需要清理，也没有旧用户层取值需要迁移；新增 `dock` 未配置时按 `auto`。仍未执行：重载插件后的真实宿主正向断言、设置页卡片的实际渲染与保存后页面即时变化、并发写入的 revision 冲突拒绝、assemble 层非法取值在真实宿主下是否会被 cordis 的 `Config` 校验先行拒绝（见下方待确认项）。技能目录条目（名称／描述／whenToUse）仍随每次会话出现，它是模型发现工作台的入口，本版不提供独立开关。
+- 待确认（规格与源码现实的一处张力，F009 起就存在，本版未改其语义）：插件导出的 `Config` 用 `z.union([z.const(...)])` 声明三值枚举，schemastery 对非法取值**直接抛错**（实测 `Config({ dock: 'sometimes' })` 抛 `$.dock expected "always" | "auto" | "off" but got "sometimes"`）。而 cordis 会在调用 `apply` 前用 `Config` 校验组装层配置，因此 profile `cordis.patch.yml` 里的非法 `dock` 取值可能在进入 `apply` 之前就让插件加载失败，使 F009／F010 声明的「非法取值按 `auto` 处理并记警告」在真实组装层不可达（该分支只在直接调用 `apply`、未经 schema 校验时可达，现有假 ctx 用例即属此路径）。本版按「F009 语义不得变」保留现状（枚举 schema 与归一化告警分支都未改），待确认是否允许把 schema 放宽为字符串加运行时归一化——那会改变 F009 已确认的 schema 声明，属新增语义差异，需先确认再改。
 
 ## 规格变更记录
 
@@ -116,3 +118,4 @@
 - 2026-10-10：新增 F009（摘要栏显示策略与上下文注入条件），修订 F006 的注入条件与 F007 的显示条件；配置契约与技术契约同步到 [architecture.md](architecture.md) 的「配置契约」。本版为待用户确认的文档增量，未改动源码、测试或运行配置。
 - 2026-10-10：用户确认上一版文档后实现 F009，包版本提高到 0.2.0。实现依据、测试入口与未执行项见 F009；技术契约补充实现模块位置。
 - 2026-10-10：新增 F010（设置页插件配置卡片），把 [architecture.md](architecture.md) 的「配置契约」扩写为「用户层 > 组装层 > schema 默认」两层，写明 `applies: 'live'` 与组装层改动需重载的差异；F009 的显示与注入语义不变。本版为待用户确认的文档增量，未改动源码、测试或运行配置。
+- 2026-10-10：用户确认上一版文档后实现 F010，包版本提高到 0.3.0。宿主注册 namespace 并把判定改为每次读取当前解析值、设置变更后重推快照；客户端新增设置卡。实现依据、测试入口与未执行项见 F010；契约补充实现模块位置，并按真实 scope API 把「带 revision 保存」修正为经 `mutate`（`set`／`unset` 不接受 `expectedRevision`）。

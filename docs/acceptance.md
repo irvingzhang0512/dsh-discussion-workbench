@@ -2,6 +2,15 @@
 
 更新时间：2026-10-10（Asia/Shanghai）。
 
+## 2026-10-10：0.3.0 设置页插件配置卡片（F010）
+
+- `npm run typecheck` 通过；`npm test` 通过（5 个文件 39 项，F009 的 26 项保持通过，新增 13 项）；`npm run build` 通过并生成 `lib/client.js`（46.96 kB）。`npm test` 现在先重建客户端 bundle（`build:client`）再跑 vitest。
+- 新增 `tests/settings.spec.ts`（7 项）。用假 ctx 加**真实 WebSocket 桥**（进程内 http server + `ws` 客户端连 `/discussion-workbench/ws`）观察宿主实际下发的状态快照：namespace 注册为 `dsh-discussion-workbench`、`applies` 为 `live`、`base` 等于组装层配置（`{ dock: 'always' }`；组装层为 `{}` 时为空分节）、schema 只声明 `dock`（默认 `auto`，非法取值被拒绝）；组装层非法取值 `sometimes` 时插件仍挂载、告警一次且不把非法值写进 `base`；settings 服务缺失时仍把 settings 作为软依赖请求、六工具照常注册、`dock=always` 让未使用会话显示摘要栏且不注入空上下文块；设置层写入 `off` 后已使用会话的快照 `dock` 由 `true` 变 `false`（不需要重载插件，痕迹不变）；清除覆盖后回退组装层；F009 的使用痕迹／会话内记忆／上下文注入都不因配置变化被清除。
+- 新增 `tests/client-bundle.spec.ts`（5 项）：`node:vm` + React 桩 + 假 `window.__ModuleLoader__` 执行 `lib/client.js`，核对 loader id 为 `dsh-discussion-workbench`、`exports.inject` 只含 `slots`（settingsScope 未写进入口）、注册 `conversation.input.dock` 与 `settings.plugin.item` 两个 slot 且卡片 `key` 等于 namespace、绑定 namespace 正确；无会话时摘要栏返回 null 且副作用不抛错；`unavailable` 时卡片渲染为空；settingsScope 缺失时只少一张卡；保存／清除按 revision 栅栏调用 `mutate`（`[{ op: 'set', path: ['dock'], value: 'off' }], 3` 与 `[{ op: 'unset', path: ['dock'] }], 3`），未改动时保存按钮禁用。
+- `tests/host-context.spec.ts` 补 1 项：settings 缺失时仍挂载、把 settings 作为软依赖请求、不写进入口 `inject`。
+- 用例有效性反证：临时把实现变异为「挂载时冻结取值」时，2 项 live 生效用例失败；变异为「不重推设置变更」时 3 项失败；两次变异均已回滚，最终 39 项全绿。这确认新增用例不是空断言。
+- 未执行：重载插件后的真实宿主正向断言与浏览器页面验收。宿主半侧改动需重启进程才生效，本次未重启承载当前会话的环境（3080 日常实例即该进程），因此运行中的宿主仍是旧代码；设置页卡片的实际渲染、保存后的页面即时变化、并发写入的 revision 冲突拒绝仍待重载后核对。
+
 ## 2026-10-10：0.2.0 摘要栏显示策略与上下文注入条件
 
 - `npm run typecheck`、`npm test`（3 个文件 26 项）和 `npm run build` 通过；`lib/host/dock.js` 已生成，`node -e "import('./lib/index.js')"` 可加载导出 `apply`／`Config`。

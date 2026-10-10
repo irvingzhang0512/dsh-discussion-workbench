@@ -1,14 +1,47 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkbenchScene, WorkbenchState } from '../shared/types.ts'
+import { SETTINGS_NAMESPACE } from '../shared/settings.ts'
 
 export const inject = ['slots']
+
+interface SlotDefinition {
+  name: string
+  id?: string
+  /** keyed slot（如 settings.plugin.item）的键；设置页按 namespace 派发卡片。 */
+  key?: string
+  order?: number
+  label?: () => string
+}
+
+/** 绑定后的设置 scope 快照；形状见 docs/architecture.md 的「设置页卡片」。 */
+interface SettingsSnapshot {
+  status: 'loading' | 'ready' | 'unavailable'
+  value?: { dock?: unknown }
+  base?: { dock?: unknown }
+  user?: { dock?: unknown }
+  revision?: number
+  writable?: boolean
+  mode?: string
+}
+
+type SettingsOperation = { op: 'set', path: string[], value: unknown } | { op: 'unset', path: string[] }
+
+interface BoundSettingsScope {
+  getSnapshot(): SettingsSnapshot
+  subscribe(listener: () => void): () => void
+  /** 单操作写入以 revision 作栅栏；`set`／`unset` 是它的单操作形式，不能带栅栏。 */
+  mutate(operations: SettingsOperation[], expectedRevision?: number): Promise<unknown>
+}
 
 interface ClientContext {
   slots: {
     inject(name: string, register: () => (() => void)): void
-    register(definition: { name: string, id: string, order: number, label: () => string }, component: (props: DockProps) => React.ReactElement | null): () => void
+    register(definition: SlotDefinition, component: (props: DockProps) => React.ReactElement | null): () => void
   }
   effect(fn: () => (() => void), label?: string): void
+  /** settingsScope 是软依赖：不写进 exports.inject，缺失时只少一张设置卡。 */
+  inject(deps: string[], callback: (ctx: ClientContext) => void): void
+  settingsScope?: { bind(spec: { namespace: string }): BoundSettingsScope }
 }
 
 interface DockProps { sessionId?: string }
@@ -23,6 +56,16 @@ export function apply(ctx: ClientContext): void {
     { name: 'conversation.input.dock', id: 'dsh-discussion-workbench', order: -20, label: () => '讨论工作台' },
     props => <WorkbenchBar sessionId={props.sessionId} />,
   ))
+  // 设置卡是可选 UI：settingsScope 缺失时不注册，摘要栏与工作台其他功能照常（F010）。
+  ctx.inject(['settingsScope'], sctx => {
+    const settingsScope = sctx.settingsScope
+    if (settingsScope === undefined) return
+    const bound = settingsScope.bind({ namespace: SETTINGS_NAMESPACE })
+    ctx.slots.inject('settings.plugin.item', () => ctx.slots.register(
+      { name: 'settings.plugin.item', key: SETTINGS_NAMESPACE, order: 100 },
+      () => <DockSettingsCard scope={bound} />,
+    ))
+  })
   ctx.effect(() => () => {
     delete window.__DSH_DISCUSSION_WORKBENCH__
     targets.clear()
@@ -218,6 +261,104 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
   )
 }
 
+const DOCK_VALUES = ['always', 'auto', 'off'] as const
+type DockValue = typeof DOCK_VALUES[number]
+
+const DOCK_HINTS: Record<DockValue, string> = {
+  always: '任何会话都显示摘要栏；未使用工作台的会话仍不注入模型上下文。',
+  auto: '只有已使用工作台（已有固定整理目标、参考材料或已打开会议）的会话显示摘要栏。',
+  off: '任何会话都不显示摘要栏；工具、技能与模型上下文不受影响。',
+}
+
+function isDockValue(value: unknown): value is DockValue {
+  return typeof value === 'string' && (DOCK_VALUES as readonly string[]).includes(value)
+}
+
+/** 当前生效值；namespace 尚未就绪或取值异常时按 schema 默认 `auto`。 */
+function effectiveDock(snapshot: SettingsSnapshot): DockValue {
+  return isDockValue(snapshot.value?.dock) ? snapshot.value.dock : 'auto'
+}
+
+/** 字段出现在 `user` 层即视为用户覆盖，即使取值与组装层相同。 */
+function dockOverridden(snapshot: SettingsSnapshot): boolean {
+  return snapshot.user !== undefined && snapshot.user !== null && Object.prototype.hasOwnProperty.call(snapshot.user, 'dock')
+}
+
+/**
+ * 设置页「插件 → 插件配置」的 `dock` 卡片（F010）：一个三选一控件，标明该字段是否被用户
+ * 覆盖，保存按 revision 栅栏写入设置文档的用户层，清除后回退组装层。namespace 未对本客户端
+ * 服务时渲染为空，而不是渲染一张无法操作的卡。
+ */
+function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.ReactElement | null {
+  const [snapshot, setSnapshot] = useState<SettingsSnapshot>(() => scope.getSnapshot())
+  const [draft, setDraft] = useState<DockValue>(() => effectiveDock(scope.getSnapshot()))
+  const [dirty, setDirty] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+  const dirtyRef = useRef(false)
+  // 开始草拟时读取的 revision 作为固定栅栏：过期保存被拒绝，而不是覆盖并发修改。
+  const fence = useRef<number | undefined>(scope.getSnapshot().revision)
+
+  useEffect(() => {
+    const sync = (): void => {
+      const next = scope.getSnapshot()
+      setSnapshot(next)
+      if (!dirtyRef.current) { setDraft(effectiveDock(next)); fence.current = next.revision }
+    }
+    const stop = scope.subscribe(sync)
+    sync()
+    return stop
+  }, [scope])
+
+  if (snapshot.status === 'unavailable') return null
+  if (snapshot.status !== 'ready') return <div className="dwb-settings"><p className="dwb-settings-hint">正在读取插件设置…</p></div>
+
+  const covered = dockOverridden(snapshot)
+  const readonly = snapshot.writable === false
+  const commit = (operations: SettingsOperation[], message: string): void => {
+    setBusy(true); setError(''); setNotice('')
+    void scope.mutate(operations, fence.current).then(() => {
+      dirtyRef.current = false
+      setDirty(false)
+      const next = scope.getSnapshot()
+      fence.current = next.revision
+      setSnapshot(next); setDraft(effectiveDock(next))
+      setNotice(message)
+    }, (cause: unknown) => {
+      setError(`保存失败：${cause instanceof Error ? cause.message : String(cause)}`)
+    }).finally(() => setBusy(false))
+  }
+  const inherit = isDockValue(snapshot.base?.dock) ? snapshot.base.dock : 'auto'
+  return <div className="dwb-settings">
+    <div className="dwb-settings-head">
+      <strong>摘要栏显示策略</strong>
+      <span className={`dwb-settings-badge ${covered ? 'is-override' : ''}`}>{covered ? '用户覆盖' : '继承组装层'}</span>
+    </div>
+    <div className="dwb-settings-row">
+      <select
+        aria-label="摘要栏显示策略"
+        disabled={busy || readonly}
+        value={draft}
+        onChange={event => {
+          const value = event.target.value
+          if (!isDockValue(value)) return
+          dirtyRef.current = true; setDirty(true); setDraft(value); setNotice(''); setError('')
+        }}
+      >
+        {DOCK_VALUES.map(value => <option key={value} value={value}>{value}</option>)}
+      </select>
+      <button type="button" disabled={busy || readonly || !dirty} onClick={() => commit([{ op: 'set', path: ['dock'], value: draft }], '已保存，摘要栏策略立即生效（不需要重载插件）。')}>保存</button>
+      <button type="button" disabled={busy || readonly || !covered} onClick={() => commit([{ op: 'unset', path: ['dock'] }], '已清除用户覆盖，回退到组装层配置。')}>恢复组装层</button>
+    </div>
+    <p className="dwb-settings-hint">{DOCK_HINTS[draft]}</p>
+    <p className="dwb-settings-meta">当前生效：{effectiveDock(snapshot)}（{covered ? `覆盖组装层 ${inherit}` : `组装层 ${inherit}`}）。这里保存即时生效；组装层 <code>cordis.patch.yml</code> 的改动仍需重载插件。</p>
+    {dirty && <p className="dwb-settings-hint">有未保存的修改。</p>}
+    {notice && <p className="dwb-settings-notice">{notice}</p>}
+    {error && <p className="dwb-settings-error">{error}</p>}
+  </div>
+}
+
 function submitMeeting(send: (message: object) => void, action: 'open-meeting' | 'select-record' | 'select-minutes' | 'toggle-reference' | 'save-info' | 'import-docx' | 'export-pdf', fields: object, _label: string): void {
   send({ type: 'meeting-action', requestId: globalThis.crypto.randomUUID(), action, ...fields })
 }
@@ -285,7 +426,8 @@ function changeText(change: NonNullable<WorkbenchState['lastChange']>): string {
 function injectStyle(): void {
   if (document.getElementById('dwb-style')) return
   const style = document.createElement('style'); style.id = 'dwb-style'; style.textContent = `
-.dwb-shell{--dwb-text:var(--dsw-alias-label-primary,#242933);--dwb-muted:var(--dsw-alias-label-secondary,#697180);--dwb-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-accent:var(--dsw-alias-brand-primary,#4f6ef7);--dwb-border:var(--dsw-alias-border-l2,#e9ebef);box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance,16px));max-width:var(--dsh-composer-card-max-width,720px);min-width:0;margin:0 auto;font-size:12px;line-height:1.5;font-family:inherit;border:1px solid var(--dwb-border);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);overflow:hidden;container-type:inline-size;container-name:dwb}
+.dwb-shell,.dwb-settings{--dwb-text:var(--dsw-alias-label-primary,#242933);--dwb-muted:var(--dsw-alias-label-secondary,#697180);--dwb-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-accent:var(--dsw-alias-brand-primary,#4f6ef7);--dwb-border:var(--dsw-alias-border-l2,#e9ebef)}
+.dwb-shell{box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance,16px));max-width:var(--dsh-composer-card-max-width,720px);min-width:0;margin:0 auto;font-size:12px;line-height:1.5;font-family:inherit;border:1px solid var(--dwb-border);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);overflow:hidden;container-type:inline-size;container-name:dwb}
 .dwb-shell *{box-sizing:border-box}
 .dwb-summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;width:100%;gap:14px;align-items:center;border:0;border-radius:11px;background:transparent;color:inherit;font:inherit;padding:9px 12px;text-align:left;cursor:pointer;transition:background-color .15s}
 .dwb-summary:hover,.dwb-summary[aria-expanded="true"]{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.06))}
@@ -303,6 +445,20 @@ function injectStyle(): void {
 .dwb-meeting,.dwb-meeting-info{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;border:1px solid rgba(79,110,247,.24);border-radius:7px}.dwb-meeting input{flex:1;min-width:180px}.dwb-meeting-info input{min-width:100px;flex:1}.dwb-meeting button,.dwb-meeting-info button,.dwb-source button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-meeting button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-source{border:1px solid rgba(128,128,128,.25);border-radius:7px;padding:7px}.dwb-source>div{display:flex;gap:6px;align-items:center}.dwb-source input{flex:1;min-width:120px}.dwb-source pre{max-height:260px;overflow:auto;white-space:pre-wrap;line-height:1.45;margin:7px 0 0;background:rgba(128,128,128,.06);padding:7px}
 .dwb-node-editor{display:grid;grid-template-columns:1fr auto auto;gap:6px;border:1px solid rgba(53,164,91,.26);border-radius:7px;padding:7px}.dwb-node-editor input,.dwb-node-editor textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-node-editor textarea{grid-column:1/-1;min-height:88px;resize:vertical}.dwb-node-editor button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
 @container dwb (max-width:580px){.dwb-row{flex-wrap:wrap}.dwb-row label{flex:none}.dwb-row .dwb-spacer{display:none}.dwb-file-candidate{flex-basis:calc(100% - 70px);flex-wrap:wrap}.dwb-file-candidate .dwb-meta{flex-basis:100%}.dwb-file-reason{white-space:normal}.dwb-paste{grid-template-columns:minmax(0,1fr)}.dwb-paste input,.dwb-paste textarea{min-width:0;width:100%}.dwb-source>div{flex-wrap:wrap}.dwb-node-editor{grid-template-columns:minmax(0,1fr) auto}.dwb-node-editor input{grid-column:1/-1;min-width:0}}
+.dwb-settings{display:grid;gap:7px;padding:11px 12px;border:1px solid var(--dwb-border);border-radius:10px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);font-size:12px;line-height:1.5}
+.dwb-settings *{box-sizing:border-box}
+.dwb-settings-head{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.dwb-settings-badge{padding:2px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#f2f4f7);color:var(--dwb-muted);font-size:11px;white-space:nowrap}
+.dwb-settings-badge.is-override{background:color-mix(in srgb,var(--dwb-accent) 12%,transparent);color:var(--dwb-accent)}
+.dwb-settings-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.dwb-settings-row select{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px 6px;font:inherit;min-width:120px}
+.dwb-settings-row button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
+.dwb-settings-row button:disabled{cursor:not-allowed;opacity:.45}
+.dwb-settings-hint,.dwb-settings-meta{margin:0;color:var(--dwb-muted)}
+.dwb-settings-meta{font-size:11px}
+.dwb-settings-meta code{font-family:ui-monospace,Consolas,monospace}
+.dwb-settings-notice{margin:0;color:var(--dsw-alias-state-success-primary,#35a45b)}
+.dwb-settings-error{margin:0;color:#b52828}
 `
   document.head.appendChild(style)
 }

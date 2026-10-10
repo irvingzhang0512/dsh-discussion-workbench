@@ -43,6 +43,19 @@ export interface StructuredDocumentViewServiceShape {
 
 interface DocNodeShape { id: string, title: string, content: string, children: DocNodeShape[] }
 
+/**
+ * 设置服务面（软依赖）：缺失时不注册 namespace，`dock` 只用组装层配置。
+ * 只声明本插件用到的部分——`get()` 返回当前解析值（用户层 > base > schema 默认）。
+ */
+export interface WorkbenchSettingsScope {
+  get(): unknown
+  watch(callback: (next: unknown) => void): () => void
+}
+
+export interface WorkbenchSettingsService {
+  register(namespace: string, schema: unknown, options?: { base?: unknown, applies?: 'live' | 'restart' }): WorkbenchSettingsScope
+}
+
 export interface WorkbenchContextShape {
   tools: { register(tool: ToolDefinition): () => void }
   skills: { register(skill: SkillRegistration): () => void }
@@ -53,6 +66,9 @@ export interface WorkbenchContextShape {
     context(value: { name: string, order: number, text: (context: { agent?: { session?: { id?: unknown } } }) => string }): () => void
   }
   effect(fn: () => (() => void) | void, label?: string): void
+  /** settings 是软依赖：不写进入口 inject，用 ctx.inject(['settings'], …) 挂载。 */
+  settings?: WorkbenchSettingsService
+  inject<T = unknown>(deps: string[], callback: (ctx: Context) => T): T | undefined
   logger?: { warn?(message: string): void }
 }
 

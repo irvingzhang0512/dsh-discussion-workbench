@@ -18,7 +18,9 @@ DSH 文字讨论工作台。它在原生输入框上方显示会议/项目场景
     dock: auto   # always 所有会话都显示；auto（默认）只在已使用工作台的会话显示；off 任何会话都不显示
 ```
 
-六个工具与技能始终注册，不受该配置影响。上面这段组装层配置在插件重载后生效；未识别的取值按 `auto` 处理并记录警告。摘要栏完全由宿主下发的判定决定：宿主尚未重载、还没下发该判定时，页面不显示摘要栏。设置页「插件 → 插件配置」的卡片（F010）是待实现规格，当前还没有这个入口；两层解析顺序（用户层 > 组装层 `base` > schema 默认）与卡片契约见 [docs/architecture.md](docs/architecture.md#配置契约)。
+六个工具与技能始终注册，不受该配置影响。上面这段组装层配置在插件重载后生效；未识别的取值按 `auto` 处理并记录警告。摘要栏完全由宿主下发的判定决定：宿主尚未重载、还没下发该判定时，页面不显示摘要栏。
+
+同一个 `dock` 也可以在设置页「插件 → 插件配置」里改：解析顺序是**用户层（设置页）> 组装层（`cordis.patch.yml` 的 `config`）> schema 默认值**。**设置页保存即时生效、不需要重载插件**，并会同步到已打开的页面；**组装层 `cordis.patch.yml` 的改动仍需重载插件**。卡片会标明该字段是否被用户覆盖，清除后回退组装层；没有 `settings` 服务时用组装层配置，卡片不出现。两层契约见 [docs/architecture.md](docs/architecture.md#配置契约)，功能编号见 [docs/SPEC.md](docs/SPEC.md) 的 F009／F010。
 
 提供六个工具：`open_meeting_workbench`、`update_meeting_info`、`get_workbench_context`、`set_workbench_context`、`read_material`、`search_meeting_source`（注册见 [tools.ts](src/host/tools.ts)）。文档内容仍由 `dsh-structured-document` 负责，视图仍由 `dsh-structured-document-view` 负责，浏览状态由 `dsh-better-sidebar-controller` 提供。工作台把这三项声明为宿主依赖，确保服务完成挂载后再开始会话协调。
 

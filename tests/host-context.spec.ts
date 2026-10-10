@@ -24,6 +24,7 @@ async function harness(config?: unknown) {
   const tools: FakeTool[] = []
   const warnings: string[] = []
   const disposers: Array<() => void> = []
+  const injected: string[][] = []
   let contextText: ((context: { agent?: { session?: { id?: string } } }) => string) | undefined
 
   const structuredDocument = {
@@ -45,6 +46,11 @@ async function harness(config?: unknown) {
     webRuntime: { trustedHosts: [] },
     logger: { warn: (message: string) => { warnings.push(message) } },
     effect: (fn: () => (() => void)) => { const cleanup = fn(); disposers.push(cleanup); return cleanup },
+    // settings 是软依赖：本 harness 不提供 settings 服务，回调不发生（等同设置服务缺失）。
+    inject: (deps: string[], callback: (inner: unknown) => unknown) => {
+      injected.push(deps)
+      if (!deps.includes('settings')) return callback(ctx)
+    },
   }
 
   apply(ctx as unknown as ApplyContext, config as ApplyConfig)
@@ -57,7 +63,7 @@ async function harness(config?: unknown) {
     return found
   }
   const exec = (sessionId: string) => ({ agent: { session: { id: sessionId } } })
-  return { root, tools, warnings, text, tool, exec, dispose: () => { for (const cleanup of disposers) cleanup() } }
+  return { root, tools, warnings, injected, text, tool, exec, dispose: () => { for (const cleanup of disposers) cleanup() } }
 }
 
 describe('宿主配置与上下文注入条件', () => {
@@ -74,6 +80,19 @@ describe('宿主配置与上下文注入条件', () => {
     try {
       expect(host.tools).toHaveLength(6)
       expect(host.warnings).toEqual([])
+    } finally { host.dispose() }
+  })
+
+  it('settings 缺失时仍挂载：把 settings 作为软依赖请求，不写进入口 inject', async () => {
+    const host = await harness({ dock: 'always' })
+    try {
+      // 六工具与技能照常注册，说明 settings 缺失没有推迟或中断挂载。
+      expect(host.tools).toHaveLength(6)
+      expect(host.injected.some(deps => deps.includes('settings'))).toBe(true)
+      expect(host.warnings).toEqual([])
+      // 无 settings 时判定只用组装层配置：always 下未使用的会话也不注入空上下文（F009）。
+      await host.tool('get_workbench_context').execute({}, host.exec('s1'))
+      expect(host.text('s1')).toBe('')
     } finally { host.dispose() }
   })
 

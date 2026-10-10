@@ -1,5 +1,16 @@
 # 更新记录
 
+## 0.3.0（2026-10-10）
+
+- 新增设置页「插件 → 插件配置」卡片（F010）：`dock` 可在界面里改成 `always` / `auto` / `off`，标明该字段是否被用户覆盖，清除后回退组装层配置。
+- 宿主在 `settings` 服务存在时注册 namespace `dsh-discussion-workbench`（schema 只声明 `dock`，三值枚举、默认 `auto`），组装层配置作为 `base` 层，效果时机 `applies: 'live'`。解析顺序为「用户层 > 组装层 > schema 默认」。
+- 摘要栏判定改为每次读取当前解析值，不再只在挂载时捕获；设置层保存即时生效、不需要重载插件，并会对已连接会话按现有快照通道重推一次状态，已打开的页面无需刷新。组装层 `cordis.patch.yml` 的 `config` 改动仍需重载插件。
+- `settings` 与客户端 `settingsScope` 都是软依赖：不写进入口 `inject`，缺失时不注册 namespace、不出现卡片，插件与摘要栏照常工作。
+- F009 语义不变：`auto` 仍只在该会话已使用工作台时显示摘要栏；模型上下文注入只跟随使用痕迹、不跟随 `dock`；会话内显示记忆不因配置变化被清除。工具与技能始终注册。
+- 实现对非法取值的处理：设置层由 schema 拒绝（非法值不落盘），组装层读取时归一化并记警告；组装层非法取值不写入 `base`，避免注册被 schema 拒绝而中断挂载。
+- 新增 `tests/settings.spec.ts`（7 项：namespace 注册形状、组装层缺省与非法取值、settings 缺失回退、真实 WebSocket 桥上的设置层判定跟随与 F009 语义保持）与 `tests/client-bundle.spec.ts`（5 项 vm 冒烟：loader id、slot 与卡片 key、无会话不抛错、`unavailable` 渲染为空、软依赖回退、保存按 revision 栅栏调 `mutate`）；`tests/host-context.spec.ts` 补 1 项 settings 软依赖用例。
+- `npm run typecheck`、`npm test`（5 个文件 39 项，原 26 项保持通过）与 `npm run build` 通过。`npm test` 现在会先重建 `lib/client.js`（新增 `build:client` 脚本）再跑 vitest，保证 bundle 冒烟测试的是当前源码。未做真实宿主与页面验收：需要重载插件后才生效，本次未重启承载当前会话的环境。
+
 ## 0.2.0（2026-10-10）
 
 - 新增宿主配置 `dock`（`always` / `auto` / `off`，默认 `auto`）：摘要栏默认只在该会话已使用工作台（已有固定整理目标、参考材料或已打开会议）时出现，不再在任何会话常驻。

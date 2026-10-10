@@ -116,6 +116,8 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
   }, [id, socket])
 
   if (id === '') return null
+  // 宿主按配置与使用痕迹下发显示判定（F009）：未判定为显示时不渲染，也不占用输入区。
+  if (state?.dock !== true) return null
   const send = (message: object): void => {
     if (socket.current?.readyState !== WebSocket.OPEN) { setError('工作台尚未连接。'); return }
     socket.current.send(JSON.stringify(message))

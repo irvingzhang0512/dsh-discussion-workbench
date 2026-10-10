@@ -12,17 +12,28 @@ import { WorkbenchStore } from './host/store.ts'
 import { WorkbenchBridge } from './host/bridge.ts'
 import { registerWorkbenchTools } from './host/tools.ts'
 import { trustedRequest } from './host/trust-fence.ts'
+import { DockVisibility, isWorkbenchUsed, resolveDockMode, type DockMode } from './host/dock.ts'
 
 export const name = 'dsh-discussion-workbench'
 export const inject = ['tools', 'skills', 'sessions', 'webServer', 'webRuntime', 'systemPrompt', 'structuredDocument', 'sidebarController', 'structuredDocumentView']
-export const Config = z.object({})
+export const Config = z.object({
+  dock: z.union([z.const('always'), z.const('auto'), z.const('off')]).default('auto')
+    .description('输入区上方工作台摘要栏的显示策略：always 所有会话都显示；auto（默认）只在该会话已使用工作台时显示；off 任何会话都不显示。'),
+})
+export type PluginConfig = { dock?: DockMode }
 export const BRIDGE_PATH = '/discussion-workbench/ws'
 const execFileAsync = promisify(execFile)
 
-export function apply(ctx: Context): void {
+export function apply(ctx: Context, baseConfig?: PluginConfig): void {
+  const resolvedDock = resolveDockMode(baseConfig?.dock)
+  const dockMode = resolvedDock.mode
+  if (resolvedDock.invalid) {
+    ctx.logger?.warn?.(`[discussion-workbench] 无法识别的 dock 配置取值 ${JSON.stringify(baseConfig?.dock)}，按 auto 处理。`)
+  }
+  const dockVisibility = new DockVisibility()
   const bridge = new WorkbenchBridge()
   const cwd = (sessionId: string): string => ctx.sessions.get(sessionId)?.header?.cwd || process.cwd()
-  const store = new WorkbenchStore({ cwd, onChange: (sessionId, state) => bridge.state(sessionId, state) })
+  const store = new WorkbenchStore({ cwd, onChange: (sessionId, state) => bridge.state(sessionId, { ...state, dock: dockVisibility.visible(dockMode, sessionId, isWorkbenchUsed(state)) }) })
   const documentService = ctx.get('structuredDocument') as StructuredDocumentServiceShape | undefined
   const sidebarService = ctx.get('sidebarController') as SidebarControllerServiceShape | undefined
   const viewService = ctx.get('structuredDocumentView') as StructuredDocumentViewServiceShape | undefined
@@ -220,6 +231,8 @@ export function apply(ctx: Context): void {
       if (typeof id !== 'string' || id === '') return ''
       const state = store.peek(id)
       if (state === undefined) return ''
+      // 未使用工作台的会话不注入任何工作台文本（F009）；注入条件只跟随使用痕迹，不跟随 dock。
+      if (!isWorkbenchUsed(state)) return ''
       const materialList = state.materials.map(item => `${item.id}:${item.label}`).join('、') || '无'
       const lines = [
         '[讨论工作台上下文]',
@@ -355,7 +368,7 @@ export function apply(ctx: Context): void {
         })
       }
     })
-    ws.on('close', () => { detach(); void store.mutateRuntime(sessionId, state => { state.connected = false }) })
+    ws.on('close', () => { detach(); dockVisibility.release(sessionId); void store.mutateRuntime(sessionId, state => { state.connected = false }) })
     ws.on('error', () => detach())
   }
 

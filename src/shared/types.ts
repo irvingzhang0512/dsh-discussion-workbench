@@ -94,6 +94,8 @@ export interface WorkbenchState {
   metrics: WorkbenchMetrics
   connected: boolean
   updatedAt: number
+  /** 宿主按配置与使用痕迹下发的摘要栏显示判定；只随快照下发，不写入持久文件。 */
+  dock?: boolean
 }
 
 export type ClientMessage =

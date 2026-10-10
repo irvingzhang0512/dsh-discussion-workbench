@@ -18,7 +18,7 @@ DSH 文字讨论工作台。它在原生输入框上方显示会议/项目场景
     dock: auto   # always 所有会话都显示；auto（默认）只在已使用工作台的会话显示；off 任何会话都不显示
 ```
 
-六个工具与技能始终注册，不受该配置影响。配置在插件重载后生效；未识别的取值按 `auto` 处理并记录警告。契约见 [docs/architecture.md](docs/architecture.md#配置契约)。
+六个工具与技能始终注册，不受该配置影响。配置在插件重载后生效；未识别的取值按 `auto` 处理并记录警告。摘要栏完全由宿主下发的判定决定：宿主尚未重载、还没下发该判定时，页面不显示摘要栏。契约见 [docs/architecture.md](docs/architecture.md#配置契约)。
 
 提供六个工具：`open_meeting_workbench`、`update_meeting_info`、`get_workbench_context`、`set_workbench_context`、`read_material`、`search_meeting_source`（注册见 [tools.ts](src/host/tools.ts)）。文档内容仍由 `dsh-structured-document` 负责，视图仍由 `dsh-structured-document-view` 负责，浏览状态由 `dsh-better-sidebar-controller` 提供。工作台把这三项声明为宿主依赖，确保服务完成挂载后再开始会话协调。
 

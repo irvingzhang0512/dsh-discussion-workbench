@@ -58,7 +58,8 @@ Cordis 在上述三个协作服务就绪后挂载工作台，避免依赖插件�
 - 写入必须走 `mutate`：`set(field, value)`／`unset(field)` 只是它的单操作形式，**不接受** `expectedRevision`；需要 revision 栅栏时调用 `mutate([{ op: 'set', path: ['dock'], value }])` 或 `mutate([{ op: 'unset', path: ['dock'] }], revision)`。卡片在开始草拟时记录快照 revision 作为固定栅栏，过期保存被拒绝而不是覆盖并发修改。
 - 卡片字段：`dock` 一个三选一控件（`always` / `auto` / `off`，默认 `auto`）；编辑先暂存草稿，保存时才按序写入，并标明该字段是否被用户覆盖、清除后回退到组装层。namespace 对本客户端不可用（`unavailable`）时不渲染卡片，而不是渲染一张无法操作的卡。
 - 卡片自绘内部：官方卡片外壳（`PluginCard` 及其 `CardShell`／`CardFieldSpec` 表单模型）与卡片文案键属于 `@deepseek-ai/dsh-client-ui-settings-plugins` 的包内 locale 字典（`PluginsSettingsLocaleKey`），客户端纯度门禁禁止跨插件值导入，因此本插件的卡片自绘标题、说明与控件样式，只经 cordis 服务（`slots`、`settingsScope`）与宿主协作。
-- 客户端 `settingsScope` 是软依赖：缺失时只影响卡片，摘要栏与工作台其他功能照常。入口 `exports.inject` 只声明 `slots`，设置卡在 `apply` 内用 `ctx.inject(['settingsScope'], …)` 挂载；卡片自绘样式复用摘要栏的 `--dwb-*` 变量（该组变量同时声明在 `.dwb-shell` 与 `.dwb-settings` 上，设置页不在摘要栏容器内）。
+- 客户端 `settingsScope` 是软依赖：缺失时只影响卡片，摘要栏与工作台其他功能照常。入口 `exports.inject` 只声明 `slots`，设置卡在 `apply` 内用 `ctx.inject(['settingsScope'], …)` 挂载；卡片自绘样式声明在 `.dwb-card` 上（与摘要栏的 `.dwb-shell` 各自独立，设置页不在摘要栏容器内）。
+- **外观约定（F011）**：卡片不得自创"扁平、常展开的盒子"，必须镜像宿主 `PluginCard` 的视觉语法——可折叠头部（`<button>` 带 `aria-expanded`／`aria-controls`，收起只隐藏主体、组件保持挂载，草稿不因收起丢失）、带分隔线的设置行（标签与说明在左、控件行内右对齐）、右下角操作行；卡片外框取**宿主自己的数值** `.5px solid var(--dsw-alias-border-l4)` + `border-radius:16px` + `background:var(--dsw-alias-bg-layer-3)`，展开态 `bg-layer-2` + `border-color:label-dimmed`（不使用插件市场对宿主的近似值 `1px` + `border-l2` + `radius:12px`，以免同页卡片边框粗细与圆角不一致）。完整配方与数值来源见 [开发 Skill 的卡片外观配方](../../.agents/skills/dsh-plugin-develop/references/config-ui.md) §8；颜色只用 `dsh-client-ui-theme` 中真实存在的 `--dsw-alias-*` 令牌并给兜底值。头部展示插件名 + 版本号 + 一句副标题（版本号取自 [../src/shared/settings.ts](../src/shared/settings.ts) 的 `PLUGIN_VERSION`，有测试断言它与 `package.json` 一致），覆盖状态徽标放在头部右侧、chevron 左边。
 
 ## 输入框上方的工作台摘要
 

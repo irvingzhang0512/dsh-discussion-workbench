@@ -9,7 +9,12 @@
 - F009 语义不变：`auto` 仍只在该会话已使用工作台时显示摘要栏；模型上下文注入只跟随使用痕迹、不跟随 `dock`；会话内显示记忆不因配置变化被清除。工具与技能始终注册。
 - 实现对非法取值的处理：设置层由 schema 拒绝（非法值不落盘），组装层读取时归一化并记警告；组装层非法取值不写入 `base`，避免注册被 schema 拒绝而中断挂载。
 - 新增 `tests/settings.spec.ts`（7 项：namespace 注册形状、组装层缺省与非法取值、settings 缺失回退、真实 WebSocket 桥上的设置层判定跟随与 F009 语义保持）与 `tests/client-bundle.spec.ts`（5 项 vm 冒烟：loader id、slot 与卡片 key、无会话不抛错、`unavailable` 渲染为空、软依赖回退、保存按 revision 栅栏调 `mutate`）；`tests/host-context.spec.ts` 补 1 项 settings 软依赖用例。
+- 设置卡外观对齐宿主 `PluginCard`（F011，外观与文案变化并入本条目，不提高包版本）：卡片改为可折叠（头部 `<button>` 带 `aria-expanded`／`aria-controls`，收起只隐藏主体、组件保持挂载，未保存草稿不因收起丢失）；头部显示插件名 + 版本号 + 副标题，右侧为覆盖状态徽标（"用户覆盖"／"继承组装层"）与展开时旋转 180° 的 chevron；主体改为带分隔线的设置行，标签与说明在左、控件行内右对齐；`dock` 由下拉框改为分段控件，标签为「按需」（`auto`，默认）／「始终」（`always`）／「不显示」（`off`），选中态对应当前生效值；保存与恢复组装层按钮移到卡片右下角操作行。
+- 卡片外框取宿主 `PluginCard` 的真实数值（`.5px solid border-l4`、`background:bg-layer-3`、`border-radius:16px`，展开态 `bg-layer-2` + `label-dimmed`），不使用插件市场对宿主的近似值（`1px` + `border-l2` + `radius:12px`），以免同页卡片边框与圆角不一致；颜色只用 `dsh-client-ui-theme` 中真实存在的 `--dsw-alias-*` 令牌并带兜底值。F010 的配置语义（草稿 + `mutate` revision 栅栏、清除回退组装层、软依赖）与 F009 的显示／注入语义均不变。
+- `tests/client-bundle.spec.ts` 由 5 项增至 12 项：断言随新标记更新（外框、头部、主体 `id` 关联、右下角操作行），新增头部 `aria-expanded`／`aria-controls`、分段控件三项中文标签与三种生效值下的选中态、覆盖徽标文案随用户层变化、收起后草稿仍在（用会重渲染的 React 桩走查展开／收起）、样式令牌存在性与兜底值、版本号与 `package.json` 一致。
+- `npm run typecheck`、`npm test`（5 个文件 46 项，原 39 项保持通过）与 `npm run build` 通过（`lib/client.js` 53.76 kB／53756 字节，gzip 12.90 kB／12898 字节）。未做真实浏览器目视核对：需要重载插件后才生效，本次未重启承载当前会话的环境。
 - `npm run typecheck`、`npm test`（5 个文件 39 项，原 26 项保持通过）与 `npm run build` 通过。`npm test` 现在会先重建 `lib/client.js`（新增 `build:client` 脚本）再跑 vitest，保证 bundle 冒烟测试的是当前源码。未做真实宿主与页面验收：需要重载插件后才生效，本次未重启承载当前会话的环境。
+- （同日追加，见上条 F011）本条目最终验证为 5 个文件 46 项。
 
 ## 0.2.0（2026-10-10）
 

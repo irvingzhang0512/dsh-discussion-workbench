@@ -4,6 +4,21 @@ import { SETTINGS_NAMESPACE } from '../shared/settings.ts'
 
 export const inject = ['slots']
 
+/**
+ * 插件版本号：由构建期 `define` 注入（读本包 `package.json` 的 `version`，见 tsdown.config.ts）。
+ *
+ * 取自构建时读入的 `package.json` 的 `version`，因此不会随包版本漂移；客户端 bundle 里
+ * 只剩一个字符串字面量，运行时不读文件、不引入 Node 内建、也不违反纯度门禁。未注入时
+ * （例如直接跑未打包的源码）回退为 `'0.0.0-dev'`，只影响显示，不影响任何行为。
+ * 做法与 `dsh-structured-document` 一致。
+ */
+declare const __DWB_VERSION__: string | undefined
+
+/** 卡片头部显示的版本号。 */
+const PLUGIN_VERSION: string = typeof __DWB_VERSION__ === 'string' && __DWB_VERSION__ !== ''
+  ? __DWB_VERSION__
+  : '0.0.0-dev'
+
 interface SlotDefinition {
   name: string
   id?: string
@@ -264,6 +279,13 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
 const DOCK_VALUES = ['always', 'auto', 'off'] as const
 type DockValue = typeof DOCK_VALUES[number]
 
+/** 分段控件的显示顺序与中文标签；默认高亮「按需」（F011）。 */
+const DOCK_SEGMENTS: ReadonlyArray<{ value: DockValue, label: string }> = [
+  { value: 'auto', label: '按需' },
+  { value: 'always', label: '始终' },
+  { value: 'off', label: '不显示' },
+]
+
 const DOCK_HINTS: Record<DockValue, string> = {
   always: '任何会话都显示摘要栏；未使用工作台的会话仍不注入模型上下文。',
   auto: '只有已使用工作台（已有固定整理目标、参考材料或已打开会议）的会话显示摘要栏。',
@@ -285,9 +307,13 @@ function dockOverridden(snapshot: SettingsSnapshot): boolean {
 }
 
 /**
- * 设置页「插件 → 插件配置」的 `dock` 卡片（F010）：一个三选一控件，标明该字段是否被用户
- * 覆盖，保存按 revision 栅栏写入设置文档的用户层，清除后回退组装层。namespace 未对本客户端
- * 服务时渲染为空，而不是渲染一张无法操作的卡。
+ * 设置页「插件 → 插件配置」的 `dock` 卡片（F010 语义 + F011 外观）。
+ *
+ * 配置语义仍是 F010 的草稿 + 保存：写入按 revision 栅栏走 `mutate`，清除该字段回退组装层。
+ * 外观按宿主 `PluginCard` 的语法自绘（客户端纯度门禁禁止 import 它的值，因此逐类对齐而不是复用）：
+ * 可折叠头部（名称 + 版本 + 副标题 + 覆盖徽标 + chevron）、带分隔线的设置行、行内右对齐的分段控件、
+ * 右下角操作行。收起只隐藏主体，组件保持挂载，未保存草稿不因收起丢失。
+ * namespace 未对本客户端服务时渲染为空，而不是渲染一张无法操作的卡。
  */
 function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.ReactElement | null {
   const [snapshot, setSnapshot] = useState<SettingsSnapshot>(() => scope.getSnapshot())
@@ -296,9 +322,12 @@ function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.React
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  // 展开是卡片的本地阅读状态：收起不卸载组件，因此草稿与栅栏都留在 state 里。
+  const [open, setOpen] = useState(false)
   const dirtyRef = useRef(false)
   // 开始草拟时读取的 revision 作为固定栅栏：过期保存被拒绝，而不是覆盖并发修改。
   const fence = useRef<number | undefined>(scope.getSnapshot().revision)
+  const bodyId = `dwb-dock-settings-body-${SETTINGS_NAMESPACE}`
 
   useEffect(() => {
     const sync = (): void => {
@@ -312,7 +341,7 @@ function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.React
   }, [scope])
 
   if (snapshot.status === 'unavailable') return null
-  if (snapshot.status !== 'ready') return <div className="dwb-settings"><p className="dwb-settings-hint">正在读取插件设置…</p></div>
+  if (snapshot.status !== 'ready') return <section className="dwb-card"><p className="dwb-card-hint">正在读取插件设置…</p></section>
 
   const covered = dockOverridden(snapshot)
   const readonly = snapshot.writable === false
@@ -330,33 +359,60 @@ function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.React
     }).finally(() => setBusy(false))
   }
   const inherit = isDockValue(snapshot.base?.dock) ? snapshot.base.dock : 'auto'
-  return <div className="dwb-settings">
-    <div className="dwb-settings-head">
-      <strong>摘要栏显示策略</strong>
-      <span className={`dwb-settings-badge ${covered ? 'is-override' : ''}`}>{covered ? '用户覆盖' : '继承组装层'}</span>
+  return <section className={`dwb-card ${open ? 'is-open' : ''}`}>
+    <button
+      className="dwb-card-header"
+      type="button"
+      aria-expanded={open}
+      aria-controls={bodyId}
+      onClick={() => setOpen(value => !value)}
+    >
+      <span className="dwb-card-head-text">
+        <span className="dwb-card-name">讨论工作台<span className="dwb-card-version">v{PLUGIN_VERSION}</span></span>
+        <span className="dwb-card-subtitle">摘要栏显示策略</span>
+      </span>
+      <span className={`dwb-card-badge ${covered ? 'is-override' : ''}`}>{covered ? '用户覆盖' : '继承组装层'}</span>
+      <svg className="dwb-card-chevron" viewBox="0 0 16 16" width="16" height="16" fill="none" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </button>
+    <div className="dwb-card-body" id={bodyId} hidden={!open}>
+      <div className="dwb-card-field">
+        <div className="dwb-card-field-text">
+          <span className="dwb-card-field-label">摘要栏显示策略</span>
+          <span className="dwb-card-field-desc">{DOCK_HINTS[draft]}</span>
+        </div>
+        <div className="dwb-segmented" role="group" aria-label="摘要栏显示策略">
+          {DOCK_SEGMENTS.map(segment => <button
+            key={segment.value}
+            type="button"
+            className={`dwb-segment ${draft === segment.value ? 'is-active' : ''}`}
+            aria-pressed={draft === segment.value}
+            disabled={busy || readonly}
+            onClick={() => {
+              dirtyRef.current = true; setDirty(true); setDraft(segment.value); setNotice(''); setError('')
+            }}
+          >{segment.label}</button>)}
+        </div>
+      </div>
+      <p className="dwb-card-meta">当前生效：{effectiveDock(snapshot)}（{covered ? `覆盖组装层 ${inherit}` : `组装层 ${inherit}`}）。这里保存即时生效；组装层 <code>cordis.patch.yml</code> 的改动仍需重载插件。</p>
+      {!readonly && dirty && <p className="dwb-card-hint">有未保存的修改。</p>}
+      {notice && <p className="dwb-card-notice" role="status">{notice}</p>}
+      {error && <p className="dwb-card-error" role="status">{error}</p>}
+      <div className="dwb-card-footer">
+        <button
+          className="dwb-card-button"
+          type="button"
+          disabled={busy || readonly || !covered}
+          onClick={() => commit([{ op: 'unset', path: ['dock'] }], '已清除用户覆盖，回退到组装层配置。')}
+        >恢复组装层</button>
+        <button
+          className="dwb-card-button is-primary"
+          type="button"
+          disabled={busy || readonly || !dirty}
+          onClick={() => commit([{ op: 'set', path: ['dock'], value: draft }], '已保存，摘要栏策略立即生效（不需要重载插件）。')}
+        >保存</button>
+      </div>
     </div>
-    <div className="dwb-settings-row">
-      <select
-        aria-label="摘要栏显示策略"
-        disabled={busy || readonly}
-        value={draft}
-        onChange={event => {
-          const value = event.target.value
-          if (!isDockValue(value)) return
-          dirtyRef.current = true; setDirty(true); setDraft(value); setNotice(''); setError('')
-        }}
-      >
-        {DOCK_VALUES.map(value => <option key={value} value={value}>{value}</option>)}
-      </select>
-      <button type="button" disabled={busy || readonly || !dirty} onClick={() => commit([{ op: 'set', path: ['dock'], value: draft }], '已保存，摘要栏策略立即生效（不需要重载插件）。')}>保存</button>
-      <button type="button" disabled={busy || readonly || !covered} onClick={() => commit([{ op: 'unset', path: ['dock'] }], '已清除用户覆盖，回退到组装层配置。')}>恢复组装层</button>
-    </div>
-    <p className="dwb-settings-hint">{DOCK_HINTS[draft]}</p>
-    <p className="dwb-settings-meta">当前生效：{effectiveDock(snapshot)}（{covered ? `覆盖组装层 ${inherit}` : `组装层 ${inherit}`}）。这里保存即时生效；组装层 <code>cordis.patch.yml</code> 的改动仍需重载插件。</p>
-    {dirty && <p className="dwb-settings-hint">有未保存的修改。</p>}
-    {notice && <p className="dwb-settings-notice">{notice}</p>}
-    {error && <p className="dwb-settings-error">{error}</p>}
-  </div>
+  </section>
 }
 
 function submitMeeting(send: (message: object) => void, action: 'open-meeting' | 'select-record' | 'select-minutes' | 'toggle-reference' | 'save-info' | 'import-docx' | 'export-pdf', fields: object, _label: string): void {
@@ -426,7 +482,7 @@ function changeText(change: NonNullable<WorkbenchState['lastChange']>): string {
 function injectStyle(): void {
   if (document.getElementById('dwb-style')) return
   const style = document.createElement('style'); style.id = 'dwb-style'; style.textContent = `
-.dwb-shell,.dwb-settings{--dwb-text:var(--dsw-alias-label-primary,#242933);--dwb-muted:var(--dsw-alias-label-secondary,#697180);--dwb-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-accent:var(--dsw-alias-brand-primary,#4f6ef7);--dwb-border:var(--dsw-alias-border-l2,#e9ebef)}
+.dwb-shell{--dwb-text:var(--dsw-alias-label-primary,#242933);--dwb-muted:var(--dsw-alias-label-secondary,#697180);--dwb-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-accent:var(--dsw-alias-brand-primary,#4f6ef7);--dwb-border:var(--dsw-alias-border-l2,#e9ebef)}
 .dwb-shell{box-sizing:border-box;width:calc(100% - 2 * var(--dsh-composer-side-clearance,16px));max-width:var(--dsh-composer-card-max-width,720px);min-width:0;margin:0 auto;font-size:12px;line-height:1.5;font-family:inherit;border:1px solid var(--dwb-border);border-radius:12px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);overflow:hidden;container-type:inline-size;container-name:dwb}
 .dwb-shell *{box-sizing:border-box}
 .dwb-summary{display:grid;grid-template-columns:auto minmax(0,1fr) auto;width:100%;gap:14px;align-items:center;border:0;border-radius:11px;background:transparent;color:inherit;font:inherit;padding:9px 12px;text-align:left;cursor:pointer;transition:background-color .15s}
@@ -445,20 +501,47 @@ function injectStyle(): void {
 .dwb-meeting,.dwb-meeting-info{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:7px;border:1px solid rgba(79,110,247,.24);border-radius:7px}.dwb-meeting input{flex:1;min-width:180px}.dwb-meeting-info input{min-width:100px;flex:1}.dwb-meeting button,.dwb-meeting-info button,.dwb-source button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}.dwb-meeting button.is-active{border-color:#4f6ef7;background:rgba(79,110,247,.12)}.dwb-source{border:1px solid rgba(128,128,128,.25);border-radius:7px;padding:7px}.dwb-source>div{display:flex;gap:6px;align-items:center}.dwb-source input{flex:1;min-width:120px}.dwb-source pre{max-height:260px;overflow:auto;white-space:pre-wrap;line-height:1.45;margin:7px 0 0;background:rgba(128,128,128,.06);padding:7px}
 .dwb-node-editor{display:grid;grid-template-columns:1fr auto auto;gap:6px;border:1px solid rgba(53,164,91,.26);border-radius:7px;padding:7px}.dwb-node-editor input,.dwb-node-editor textarea{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px}.dwb-node-editor textarea{grid-column:1/-1;min-height:88px;resize:vertical}.dwb-node-editor button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
 @container dwb (max-width:580px){.dwb-row{flex-wrap:wrap}.dwb-row label{flex:none}.dwb-row .dwb-spacer{display:none}.dwb-file-candidate{flex-basis:calc(100% - 70px);flex-wrap:wrap}.dwb-file-candidate .dwb-meta{flex-basis:100%}.dwb-file-reason{white-space:normal}.dwb-paste{grid-template-columns:minmax(0,1fr)}.dwb-paste input,.dwb-paste textarea{min-width:0;width:100%}.dwb-source>div{flex-wrap:wrap}.dwb-node-editor{grid-template-columns:minmax(0,1fr) auto}.dwb-node-editor input{grid-column:1/-1;min-width:0}}
-.dwb-settings{display:grid;gap:7px;padding:11px 12px;border:1px solid var(--dwb-border);border-radius:10px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dwb-text);font-size:12px;line-height:1.5}
-.dwb-settings *{box-sizing:border-box}
-.dwb-settings-head{display:flex;gap:8px;align-items:center;justify-content:space-between}
-.dwb-settings-badge{padding:2px 7px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#f2f4f7);color:var(--dwb-muted);font-size:11px;white-space:nowrap}
-.dwb-settings-badge.is-override{background:color-mix(in srgb,var(--dwb-accent) 12%,transparent);color:var(--dwb-accent)}
-.dwb-settings-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.dwb-settings-row select{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:5px 6px;font:inherit;min-width:120px}
-.dwb-settings-row button{border:1px solid rgba(128,128,128,.35);border-radius:5px;background:transparent;color:inherit;padding:4px 8px;cursor:pointer}
-.dwb-settings-row button:disabled{cursor:not-allowed;opacity:.45}
-.dwb-settings-hint,.dwb-settings-meta{margin:0;color:var(--dwb-muted)}
-.dwb-settings-meta{font-size:11px}
-.dwb-settings-meta code{font-family:ui-monospace,Consolas,monospace}
-.dwb-settings-notice{margin:0;color:var(--dsw-alias-state-success-primary,#35a45b)}
-.dwb-settings-error{margin:0;color:#b52828}
+.dwb-card{--dwb-card-text:var(--dsw-alias-label-primary,#242933);--dwb-card-muted:var(--dsw-alias-label-secondary,#697180);--dwb-card-faint:var(--dsw-alias-label-tertiary,#9098a5);--dwb-card-border:var(--dsw-alias-border-l2,#e9ebef);--dwb-card-strong:var(--dsw-alias-border-l4,#dcdfe5);--dwb-card-accent:var(--dsw-alias-brand-primary,#4f6ef7);display:flex;flex-direction:column;border:.5px solid var(--dwb-card-strong);border-radius:16px;background:var(--dsw-alias-bg-layer-3,#fff);color:var(--dwb-card-text);list-style:none;transition:border-color .16s,background .16s}
+.dwb-card *{box-sizing:border-box}
+.dwb-card:hover{border-color:var(--dsw-alias-label-dimmed,rgba(128,128,128,.4))}
+.dwb-card.is-open{background:var(--dsw-alias-bg-layer-2,#f7f8fa);border-color:var(--dsw-alias-label-dimmed,rgba(128,128,128,.4))}
+.dwb-card-header{display:flex;align-items:center;gap:12px;width:100%;padding:14px 16px;border:0;border-radius:12px;background:0 0;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.dwb-card-header:focus-visible{outline:2px solid var(--dwb-card-accent);outline-offset:-2px}
+.dwb-card-head-text{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.dwb-card-name{display:flex;align-items:baseline;gap:6px;color:var(--dwb-card-text);font-size:15px;font-weight:600;line-height:1.4;min-width:0}
+.dwb-card-version{color:var(--dwb-card-faint);font-size:12px;font-weight:400;white-space:nowrap}
+.dwb-card-subtitle{color:var(--dwb-card-faint);font-size:13px;line-height:1.5}
+.dwb-card-badge{flex:none;padding:2px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-2,#f2f4f7);color:var(--dwb-card-muted);font-size:11px;line-height:18px;white-space:nowrap}
+.dwb-card-badge.is-override{background:color-mix(in srgb,var(--dwb-card-accent) 12%,transparent);color:var(--dwb-card-accent)}
+.dwb-card-chevron{flex:none;color:var(--dwb-card-faint);transition:transform .16s}
+.dwb-card-chevron.is-open,.dwb-card.is-open .dwb-card-chevron{transform:rotate(180deg)}
+.dwb-card-body{display:flex;flex-direction:column;border-top:1px solid var(--dwb-card-border);margin:0 16px;padding-bottom:8px}
+.dwb-card-body[hidden]{display:none}
+.dwb-card-field{display:flex;align-items:center;gap:12px;padding:12px 0;min-width:0}
+.dwb-card-field+.dwb-card-field{border-top:1px solid var(--dwb-card-border)}
+.dwb-card-field-text{display:flex;flex-direction:column;gap:3px;flex:1;min-width:0}
+.dwb-card-field-label{color:var(--dwb-card-text);font-size:13px;line-height:20px;font-weight:500}
+.dwb-card-field-desc{color:var(--dwb-card-faint);font-size:12px;line-height:18px}
+.dwb-segmented{display:inline-flex;flex:none;gap:0;padding:2px;border:1px solid var(--dwb-card-strong);border-radius:8px;background:transparent}
+.dwb-segment{border:0;border-radius:6px;background:transparent;color:var(--dwb-card-muted);font:inherit;font-size:12px;line-height:18px;padding:3px 10px;cursor:pointer;white-space:nowrap}
+.dwb-segment:hover:not(:disabled){color:var(--dwb-card-text)}
+.dwb-segment.is-active{background:var(--dsw-alias-bg-layer-2,#f2f4f7);color:var(--dwb-card-text);font-weight:600}
+.dwb-segment:focus-visible{outline:2px solid var(--dwb-card-accent);outline-offset:-2px}
+.dwb-segment:disabled{cursor:not-allowed;opacity:.45}
+.dwb-card-footer{display:flex;align-items:center;justify-content:flex-end;gap:8px;border-top:1px solid var(--dwb-card-border);padding:12px 0 4px;margin-top:12px}
+.dwb-card-button{border:1px solid var(--dwb-card-border);border-radius:8px;background:0 0;color:var(--dwb-card-muted);font:inherit;font-size:13px;line-height:1.5;padding:5px 14px;cursor:pointer}
+.dwb-card-button:hover:not(:disabled){color:var(--dwb-card-text);border-color:var(--dsw-alias-label-dimmed,rgba(128,128,128,.4))}
+.dwb-card-button.is-primary{border-color:transparent;background:var(--dwb-card-text);color:var(--dsw-alias-bg-layer-3,#fff)}
+.dwb-card-button:disabled{cursor:not-allowed;opacity:.4}
+.dwb-card-button:focus-visible{outline:2px solid var(--dwb-card-accent);outline-offset:1px}
+.dwb-card-hint,.dwb-card-meta{margin:0;color:var(--dwb-card-faint);font-size:12px;line-height:18px}
+.dwb-card-hint{padding-top:6px}
+.dwb-card-meta{color:var(--dwb-card-muted)}
+.dwb-card-meta code{font-family:ui-monospace,Consolas,monospace}
+.dwb-card-notice{margin:0;padding-top:6px;color:var(--dsw-alias-state-success-primary,#35a45b);font-size:12px;line-height:18px}
+.dwb-card-error{margin:0;padding-top:6px;color:var(--dsw-alias-state-error-primary,#dc2626);font-size:12px;line-height:18px}
+@container dwb (max-width:520px){.dwb-card-field{flex-wrap:wrap}.dwb-card-field-text{flex-basis:100%}.dwb-segmented{flex-wrap:wrap;max-width:100%}.dwb-card-header{flex-wrap:wrap;gap:8px 12px}.dwb-card-head-text{flex-basis:100%}}
+@media(prefers-reduced-motion:reduce){.dwb-card,.dwb-card-chevron{transition:none}}
 `
   document.head.appendChild(style)
 }

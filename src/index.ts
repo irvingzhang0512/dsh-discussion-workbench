@@ -1,3 +1,4 @@
+import { sessionDirectory } from './session-directory.ts'
 import { readFile, writeFile, stat } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { execFile } from 'node:child_process'
@@ -16,7 +17,7 @@ import { DockVisibility, isWorkbenchUsed, resolveDockMode, type DockMode } from 
 import { SETTINGS_NAMESPACE } from './shared/settings.ts'
 
 export const name = 'dsh-discussion-workbench'
-export const inject = ['tools', 'skills', 'sessions', 'webServer', 'webRuntime', 'systemPrompt', 'structuredDocument', 'sidebarController', 'structuredDocumentView']
+export const inject = ['tools', 'skills', 'sessions', 'webServer', 'connection', 'systemPrompt', 'structuredDocument', 'sidebarController', 'structuredDocumentView', 'sessionController']
 export const Config = z.object({
   dock: z.union([z.const('always'), z.const('auto'), z.const('off')]).default('auto')
     .description('输入区上方工作台摘要栏的显示策略：always 所有会话都显示；auto（默认）只在该会话已使用工作台时显示；off 任何会话都不显示。'),
@@ -42,7 +43,7 @@ export function apply(ctx: Context, baseConfig?: PluginConfig): void {
   const publishState = (sessionId: string, state: WorkbenchState): void => {
     bridge.state(sessionId, { ...state, dock: dockVisibility.visible(readDockMode(), sessionId, isWorkbenchUsed(state)) })
   }
-  const cwd = (sessionId: string): string => ctx.sessions.get(sessionId)?.header?.cwd || process.cwd()
+  const cwd = (sessionId: string): Promise<string> => sessionDirectory(ctx, sessionId)
   const store = new WorkbenchStore({ cwd, onChange: (sessionId, state) => publishState(sessionId, state) })
 
   // 已连上页面的会话：配置变化后按现有快照通道重算并推送一次，已打开的页面无需刷新（F010）。
@@ -300,7 +301,7 @@ export function apply(ctx: Context, baseConfig?: PluginConfig): void {
   const wss = new WebSocketServer({ noServer: true })
   const removeUpgrade = ctx.webServer.registerUpgrade({ path: BRIDGE_PATH, handler: (request, socket, head) => {
     const duplex = socket as unknown as Duplex
-    if (!trustedRequest(request, ctx.webRuntime.trustedHosts)) { duplex.destroy(); return }
+    if (!trustedRequest(request, ctx.connection)) { duplex.destroy(); return }
     const sessionId = new URL(request.url ?? '', 'http://localhost').searchParams.get('sessionId')
     if (sessionId === null || sessionId === '') { duplex.destroy(); return }
     wss.handleUpgrade(request as IncomingMessage, duplex, head, ws => attach(ws, sessionId))

@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile)
 const EMPTY_MEETING_INFO: MeetingInfo = { date: '', time: '', location: '', attendees: '', topic: '', recorder: '' }
 
 export interface StoreOptions {
-  cwd(sessionId: string): string
+  cwd(sessionId: string): string | Promise<string>
   onChange(sessionId: string, state: WorkbenchState): void
 }
 
@@ -55,7 +55,7 @@ export class WorkbenchStore {
     }
     if (patch.paste !== undefined) {
       const label = safeLabel(patch.paste.label || '粘贴材料')
-      const folder = join(this.options.cwd(sessionId), '.dsh-workbench', 'materials', safeSession(sessionId))
+      const folder = join(await this.options.cwd(sessionId), '.dsh-workbench', 'materials', safeSession(sessionId))
       await mkdir(folder, { recursive: true })
       const path = join(folder, `${Date.now()}-${randomUUID()}-${label}.txt`)
       await writeFile(path, patch.paste.content, 'utf8')
@@ -126,7 +126,7 @@ export class WorkbenchStore {
     const output = docx.replace(/\.docx$/i, '.md')
     let converted = false
     try { await stat(output) } catch {
-      const script = join(this.options.cwd(sessionId), 'convert-docx-to-md.ps1')
+      const script = join(await this.options.cwd(sessionId), 'convert-docx-to-md.ps1')
       await execFileAsync('pwsh', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, '-InputPath', docx, '-OutputPath', output], { windowsHide: true })
       converted = true
     }
@@ -161,7 +161,7 @@ export class WorkbenchStore {
   }
 
   async persist(state: WorkbenchState): Promise<void> {
-    const path = this.statePath(state.sessionId)
+    const path = await this.statePath(state.sessionId)
     await mkdir(dirname(path), { recursive: true })
     const temp = `${path}.tmp-${process.pid}-${randomUUID()}`
     await writeFile(temp, JSON.stringify({ ...state, connected: false, task: state.task.phase === 'idle' || state.task.phase === 'complete' || state.task.phase === 'failed' ? state.task : { phase: 'interrupted', label: '上次任务因宿主停止而中断' } }, null, 2) + '\n', 'utf8')
@@ -171,7 +171,7 @@ export class WorkbenchStore {
   private async load(sessionId: string): Promise<WorkbenchState> {
     let state: WorkbenchState = { sessionId, scene: 'meeting', targetFile: null, targetBinding: 'unbound', materials: [], meeting: null, task: { phase: 'idle', label: '' }, lastChange: null, document: null, browser: null, view: null, metrics: { modelToolRounds: 0 }, connected: false, updatedAt: Date.now() }
     try {
-      const parsed = JSON.parse(await readFile(this.statePath(sessionId), 'utf8')) as WorkbenchState
+      const parsed = JSON.parse(await readFile(await this.statePath(sessionId), 'utf8')) as WorkbenchState
       if (parsed.sessionId === sessionId) state = { ...state, ...parsed, browser: null, view: null, metrics: { ...parsed.metrics, modelToolRounds: parsed.metrics?.modelToolRounds ?? 0 }, connected: false }
     } catch { /* first use or invalid state: start clean */ }
     if (state.targetFile !== null) {
@@ -186,7 +186,7 @@ export class WorkbenchStore {
     return state
   }
 
-  private statePath(sessionId: string): string { return join(this.options.cwd(sessionId), '.dsh-workbench', 'sessions', `${safeSession(sessionId)}.json`) }
+  private async statePath(sessionId: string): Promise<string> { return join(await this.options.cwd(sessionId), '.dsh-workbench', 'sessions', `${safeSession(sessionId)}.json`) }
 
   private async persistMeeting(meeting: MeetingWorkspace): Promise<void> {
     const path = join(meeting.folder, '.meeting-workbench.json')
@@ -196,7 +196,7 @@ export class WorkbenchStore {
   }
 
   private async resolveFolder(sessionId: string, raw: string): Promise<string> {
-    const root = resolve(this.options.cwd(sessionId)); const path = resolve(isAbsolute(raw) ? raw : join(root, raw))
+    const root = resolve(await this.options.cwd(sessionId)); const path = resolve(isAbsolute(raw) ? raw : join(root, raw))
     await this.assertInside(sessionId, path)
     const canonical = await realpath(path); await this.assertInside(sessionId, canonical)
     if (!(await stat(canonical)).isDirectory()) throw new Error(`不是会议文件夹:${path}`)
@@ -204,7 +204,7 @@ export class WorkbenchStore {
   }
 
   private async resolveAllowed(sessionId: string, raw: string, extensions: string[]): Promise<string> {
-    const root = resolve(this.options.cwd(sessionId))
+    const root = resolve(await this.options.cwd(sessionId))
     const path = resolve(isAbsolute(raw) ? raw : join(root, raw))
     await this.assertInside(sessionId, path)
     if (!extensions.some(extension => path.toLowerCase().endsWith(extension))) throw new Error(`不支持的文件格式:${path}`)
@@ -216,7 +216,7 @@ export class WorkbenchStore {
   }
 
   private async assertInside(sessionId: string, path: string): Promise<void> {
-    const root = resolve(this.options.cwd(sessionId))
+    const root = resolve(await this.options.cwd(sessionId))
     const rel = relative(root, resolve(path))
     if (rel === '..' || rel.startsWith(`..\\`) || rel.startsWith('../') || isAbsolute(rel)) throw new Error(`路径超出会话工作区:${path}`)
   }

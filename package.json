@@ -1,21 +1,42 @@
 {
   "name": "dsh-discussion-workbench",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DSH 讨论工作台：统一会议与项目材料、固定整理目标、动态模型上下文和文档变更反馈。",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
   "exports": {
-    ".": { "types": "./lib/types/index.d.ts", "default": "./lib/index.js" },
-    "./client": { "default": "./lib/client.js" },
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./package.json": "./package.json",
     "./cordis.patch.yml": "./cordis.patch.yml"
   },
-  "files": ["lib", "src", "skills", "docs", "cordis.patch.yml", "README.md", "AGENTS.md"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "AGENTS.md"
+  ],
+  "engines": {
+    "node": ">=20",
+    "dsh": "0.2.1-rc.2"
+  },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web", "inject": [] }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
@@ -26,27 +47,35 @@
     "prepack": "npm run build"
   },
   "license": "MIT",
-  "dependencies": { "ws": "^8.18.0" },
+  "dependencies": {
+    "ws": "8.22.0"
+  },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
-    "@deepseek-ai/dsh-skill": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-system-prompt": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/schemastery": ">=3.18.2 <4.0.0",
-    "react": "^18.2.0"
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5",
+    "react": "^18.2.0",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-skill": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
-    "@types/node": "^24.0.0",
-    "@types/react": "^18.3.1",
-    "@types/ws": "^8.5.10",
-    "react": "^18.2.0",
-    "tsdown": "^0.22.2",
-    "typescript": "^5.8.0",
-    "vitest": "^4.1.8"
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "3.18.5",
+    "@types/node": "24.19.2",
+    "@types/react": "18.3.31",
+    "@types/ws": "8.18.2",
+    "react": "18.3.1",
+    "tsdown": "0.23.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irvingzhang0512/dsh-discussion-workbench.git"
   }
 }

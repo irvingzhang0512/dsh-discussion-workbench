@@ -1,5 +1,5 @@
 - insert:
     - id: dsh-discussion-workbench
       name: dsh-discussion-workbench
-      inject: [tools, skills, sessions, webServer, webRuntime, systemPrompt, structuredDocument, sidebarController, structuredDocumentView]
+      inject: [tools, skills, sessions, webServer, connection, systemPrompt, structuredDocument, sidebarController, structuredDocumentView, sessionController]
       config: {}

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { WorkbenchScene, WorkbenchState } from '../shared/types.ts'
 import { SETTINGS_NAMESPACE } from '../shared/settings.ts'
+import { hostWebSocketUrl } from './host-websocket.ts'
 
 export const inject = ['slots']
 
@@ -119,8 +120,9 @@ function WorkbenchBar({ sessionId }: DockProps): React.ReactElement | null {
     let stopped = false
     let retry: number | undefined
     const connect = (): void => {
-      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-      const ws = new WebSocket(`${protocol}//${location.host}/discussion-workbench/ws?sessionId=${encodeURIComponent(id)}`)
+      let ws: WebSocket
+      try { ws = new WebSocket(hostWebSocketUrl('/discussion-workbench/ws', id)) }
+      catch { setError('宿主连接地址尚未就绪。'); if (!stopped) retry = window.setTimeout(connect, 1000); return }
       socket.current = ws
       ws.onopen = () => { setConnected(true); ws.send(JSON.stringify({ type: 'hello' })) }
       ws.onmessage = event => {

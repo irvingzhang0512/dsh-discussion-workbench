@@ -57,11 +57,12 @@ export interface WorkbenchSettingsService {
 }
 
 export interface WorkbenchContextShape {
+  sessionController?: import('./session-directory.ts').SessionDirectoryContext['sessionController']
   tools: { register(tool: ToolDefinition): () => void }
   skills: { register(skill: SkillRegistration): () => void }
   sessions: { get(sessionId: string): { header?: { cwd?: string } } | undefined }
   webServer: { registerUpgrade(options: { path: string, handler: (req: IncomingMessage, socket: unknown, head: Buffer) => void }): () => void }
-  webRuntime: { trustedHosts: readonly string[] }
+  connection: Pick<import('@deepseek-ai/dsh-client-connection').HostConnectionHandle, 'requestRejection'>
   systemPrompt: {
     context(value: { name: string, order: number, text: (context: { agent?: { session?: { id?: unknown } } }) => string }): () => void
   }

@@ -113,7 +113,7 @@ async function harness(options: { config?: unknown, withSettings?: boolean } = {
     on: () => () => undefined,
     systemPrompt: { context: (spec: { text: typeof contextText }) => { contextText = spec.text; return () => undefined } },
     webServer: { registerUpgrade: (spec: { handler: (request: IncomingMessage, socket: unknown, head: Buffer) => void }) => { upgrade = spec.handler; return () => undefined } },
-    webRuntime: { trustedHosts: [] },
+    connection: { requestRejection: () => undefined },
     logger: { warn: (message: string) => { warnings.push(message) } },
     effect: (fn: () => (() => void)) => { const cleanup = fn(); disposers.push(cleanup); return cleanup },
     settings,

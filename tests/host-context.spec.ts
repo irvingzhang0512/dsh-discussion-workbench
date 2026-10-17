@@ -43,7 +43,7 @@ async function harness(config?: unknown) {
     on: () => () => undefined,
     systemPrompt: { context: (spec: { text: typeof contextText }) => { contextText = spec.text; return () => undefined } },
     webServer: { registerUpgrade: () => () => undefined },
-    webRuntime: { trustedHosts: [] },
+    connection: { requestRejection: () => undefined },
     logger: { warn: (message: string) => { warnings.push(message) } },
     effect: (fn: () => (() => void)) => { const cleanup = fn(); disposers.push(cleanup); return cleanup },
     // settings 是软依赖：本 harness 不提供 settings 服务，回调不发生（等同设置服务缺失）。

@@ -1,4 +1,4 @@
-# dsh-discussion-workbench
+# Irving · 办公讨论工作台
 
 管理参考材料、固定目标文档，联动结构化文档、视图和侧边栏工具，支持 Agent 在讨论中整理与修改文档。
 
@@ -22,7 +22,7 @@
 
 ## 安装
 
-当前本地版本 **0.3.1**，适配 **DSH Desktop 0.2.1-rc.2**。先安装并启用以下组合：
+当前本地版本 **0.2.1-rc.2+rev.1**，适配 **DSH Desktop 0.2.1-rc.2**。先安装并启用以下组合：
 
 - **Better Sidebar 0.28.0**；
 - **dsh-better-sidebar-controller 0.3.1**；
@@ -107,3 +107,8 @@
 - [当前规格](docs/SPEC.md)：现有能力与待确认的扩展设计。
 - [捆绑技能](skills/discussion-workbench/SKILL.md)、[工具定义](src/host/tools.ts)。
 - [更新记录](docs/CHANGELOG.md)、[技术架构](docs/architecture.md)、[历史验收](docs/acceptance.md)。
+
+
+## 办公套件
+
+本组件也包含在 **Irving · 办公套件**（`dsh-office-bundle`）中，版本 **0.2.1-rc.2+rev.1**。组合使用时安装套件；单独使用时安装本包，避免同时启用两种组合入口。套件总开关停用四个组件，重新开启保留各自子开关；停用或卸载不删除文档和设置。已有安装通过维护者的固定包接管流程切换。

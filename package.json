@@ -1,7 +1,7 @@
 {
   "name": "dsh-discussion-workbench",
-  "version": "0.3.1",
-  "description": "DSH 讨论工作台：统一会议与项目材料、固定整理目标、动态模型上下文和文档变更反馈。",
+  "version": "0.2.1-rc.2+rev.1",
+  "description": "管理参考材料、固定目标文档，联动结构化文档、视图和侧边栏工具，支持 Agent 在讨论中整理与修改文档。",
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",
@@ -14,7 +14,8 @@
       "default": "./lib/client.js"
     },
     "./package.json": "./package.json",
-    "./cordis.patch.yml": "./cordis.patch.yml"
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "lib",
@@ -23,7 +24,8 @@
     "docs",
     "cordis.patch.yml",
     "README.md",
-    "AGENTS.md"
+    "AGENTS.md",
+    "locale"
   ],
   "engines": {
     "node": ">=20",

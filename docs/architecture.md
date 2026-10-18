@@ -74,3 +74,7 @@ Cordis 在上述三个协作服务就绪后挂载工作台，避免依赖插件�
 新建、整篇整理和局部批量修改分别调用 `create_document`、`replace_document`、`apply_document_patch`。后两者必须带固定目标、期望版本和稳定请求 ID。文档内核按规范化路径串行写入，提交前刷新外部修改并再次核对目标和版本；一次批量修改只增加一次版本并产生一个撤销记录。
 
 Markdown 是业务事实来源。Markdown 已保存但 sidecar 保存失败时返回 `sidecarSaved: false`，不会把已落盘正文报告成完全失败。
+
+## 2026-10-18 统一展示与套件交付契约
+
+依据用户已确认的 office-suite-implementation-20261018-v1。Irving · 办公讨论工作台／Irving · Office Discussion Workbench，包 dsh-discussion-workbench 统一 0.2.1-rc.2+rev.1。展示资源通过 locale 导出提供；原条目 id、服务／工具／客户端身份、配置及存储保持。组合分组为 dsh-office-bundle-members；保留本成员原始 patch 行，用户覆盖继续按原 id 命中；子开关不因总开关恢复而重置。版本按完整字符串与固定散列核对；本节不授权原先待确认的业务扩展。

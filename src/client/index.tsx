@@ -370,7 +370,7 @@ function DockSettingsCard({ scope }: { scope: BoundSettingsScope }): React.React
       onClick={() => setOpen(value => !value)}
     >
       <span className="dwb-card-head-text">
-        <span className="dwb-card-name">讨论工作台<span className="dwb-card-version">v{PLUGIN_VERSION}</span></span>
+        <span className="dwb-card-name">Irving · 办公讨论工作台<span className="dwb-card-version">v{PLUGIN_VERSION}</span></span>
         <span className="dwb-card-subtitle">摘要栏显示策略</span>
       </span>
       <span className={`dwb-card-badge ${covered ? 'is-override' : ''}`}>{covered ? '用户覆盖' : '继承组装层'}</span>

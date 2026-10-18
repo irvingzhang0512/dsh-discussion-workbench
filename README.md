@@ -25,9 +25,9 @@
 当前本地版本 **0.2.1-rc.2+rev.1**，适配 **DSH Desktop 0.2.1-rc.2**。先安装并启用以下组合：
 
 - **Better Sidebar 0.28.0**；
-- **dsh-better-sidebar-controller 0.3.1**；
-- **dsh-structured-document 0.2.1**；
-- **dsh-structured-document-view 0.4.1**。
+- **dsh-better-sidebar-controller 0.2.1-rc.2+rev.1**；
+- **dsh-structured-document 0.2.1-rc.2+rev.1**；
+- **dsh-structured-document-view 0.2.1-rc.2+rev.1**。
 
 截至 2026-10-18，[公开源码仓库](https://github.com/irvingzhang0512/dsh-discussion-workbench)默认分支包版本为 **0.1.1**，本页版本尚未公开推送或发布。先向维护者获取当前组合的完整预构建包，目前没有本版公开下载链接。
 
@@ -112,3 +112,5 @@
 ## 办公套件
 
 本组件也包含在 **Irving · 办公套件**（`dsh-office-bundle`）中，版本 **0.2.1-rc.2+rev.1**。组合使用时安装套件；单独使用时安装本包，避免同时启用两种组合入口。套件总开关停用四个组件，重新开启保留各自子开关；停用或卸载不删除文档和设置。已有安装通过维护者的固定包接管流程切换。
+
+本次统一名称、版本与办公套件的实测范围见 [2026-10-18 验证记录](docs/VERIFICATION-OFFICE-20261018.md)。

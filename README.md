@@ -104,7 +104,7 @@
 ## 更多文档
 
 - [会议操作指南](docs/voice-meeting-minutes-guide.md)：语音材料和外部格式流程。
-- [当前规格](docs/SPEC.md)：现有能力与待确认的扩展设计。
+- [OpenSpec 现行规格与迁移索引](openspec/MIGRATION.md)：现有能力及待定变更的唯一入口；旧 docs/SPEC.md 与原始需求全文保留并冻结，不再双写。三场景扩展见 [待确认提案](openspec/changes/desktop-discussion-workflows/proposal.md)。
 - [捆绑技能](skills/discussion-workbench/SKILL.md)、[工具定义](src/host/tools.ts)。
 - [更新记录](docs/CHANGELOG.md)、[技术架构](docs/architecture.md)、[历史验收](docs/acceptance.md)。
 

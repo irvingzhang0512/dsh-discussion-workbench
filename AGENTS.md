@@ -17,3 +17,7 @@
 - 工作台只协调状态、材料和反馈，不复制结构化文档或文件树数据。
 - 所有工作区文件路径必须经过真实路径与工作区边界校验。
 - 提交信息使用 Angular / Conventional Commits，主题使用中文。
+
+## 2026-10-24 Git 分发约定
+
+根 windows-personal-workspace-v2 已确认自研通过 GitHub 固定提交安装：提交完整运行产物和资源，不依赖安装期构建 hook；开发检查仍显式运行既有 typecheck／test／build 或 JS test／lint。此约定替代旧的 lib 忽略／现场 prepack 做法；不提交 node_modules，不修改业务行为。源码推送、公网安装和本地验证分别记录。

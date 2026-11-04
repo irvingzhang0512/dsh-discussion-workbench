@@ -1,6 +1,6 @@
 {
   "name": "dsh-discussion-workbench",
-  "version": "0.2.1-rc.5+rev.1",
+  "version": "0.2.2-rc.1+rev.1",
   "description": "管理参考材料、固定目标文档，联动结构化文档、视图和侧边栏工具，支持 Agent 在讨论中整理与修改文档。",
   "type": "module",
   "main": "./lib/index.js",
@@ -29,7 +29,7 @@
   ],
   "engines": {
     "node": ">=20",
-    "dsh": "0.2.1-rc.5"
+    "dsh": "0.2.2-rc.1"
   },
   "dsh": {
     "bundle": {
@@ -52,20 +52,20 @@
     "ws": "8.22.1"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.5",
-    "@deepseek-ai/schemastery": "3.18.5",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
     "react": "^18.2.0",
-    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.5"
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.5",
-    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.5",
-    "@deepseek-ai/schemastery": "3.18.5",
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-skill": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.1",
+    "@deepseek-ai/schemastery": "3.19.0",
     "@types/node": "24.19.2",
     "@types/react": "18.3.31",
     "@types/ws": "8.18.2",
@@ -73,7 +73,7 @@
     "tsdown": "0.23.5",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
-    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.5"
+    "@deepseek-ai/dsh-client-connection": "0.2.2-rc.1"
   },
   "repository": {
     "type": "git",
